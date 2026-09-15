@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOTE="radio@boitier-radio"
+SRC="${HOME}/Radio/media/"
+DST="/srv/radio/media/"
+
+if [[ ! -d "$SRC" ]]; then
+  echo "Dossier source absent : $SRC" >&2
+  exit 1
+fi
+
+if command -v loudgain >/dev/null 2>&1; then
+  mapfile -t files < <(find "$SRC" -type f \( -name '*.mp3' -o -name '*.flac' \))
+  if ((${#files[@]} > 0)); then
+    loudgain -a -k -s e "${files[@]}"
+  fi
+else
+  echo "loudgain absent : tags ReplayGain non mis à jour" >&2
+fi
+
+nice -n 10 rsync -avh --partial --info=progress2 \
+      --bwlimit=1500 \
+      --exclude '.DS_Store' --exclude '._*' \
+      -e 'ssh -o Compression=no' \
+      "$SRC" "${HOTE}:${DST}"
+
+S='socat - UNIX-CONNECT:/run/liquidsoap/radio.sock'
+ssh "$HOTE" "for p in musique jingles emissions nuit; do echo \"\$p.reload\" | $S || true; done"
+
+echo "Déploiement terminé."

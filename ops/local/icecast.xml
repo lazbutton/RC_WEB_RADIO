@@ -1,0 +1,44 @@
+<icecast>
+    <location>New Trad Radio local bench</location>
+    <admin>lazbutton@gmail.com</admin>
+    <hostname>localhost</hostname>
+    <listen-socket>
+        <port>8000</port>
+        <bind-address>0.0.0.0</bind-address>
+    </listen-socket>
+    <authentication>
+        <source-password>ntrhackme</source-password>
+        <relay-password>ntrhackme</relay-password>
+        <admin-user>admin</admin-user>
+        <admin-password>ntradmin</admin-password>
+    </authentication>
+    <limits>
+        <clients>32</clients>
+        <sources>4</sources>
+        <queue-size>524288</queue-size>
+        <client-timeout>30</client-timeout>
+        <header-timeout>15</header-timeout>
+        <source-timeout>10</source-timeout>
+        <burst-size>65535</burst-size>
+    </limits>
+    <paths>
+        <basedir>/usr/share/icecast2</basedir>
+        <logdir>/var/log/icecast2</logdir>
+        <webroot>/usr/share/icecast2/web</webroot>
+        <adminroot>/usr/share/icecast2/admin</adminroot>
+        <alias source="/" destination="/status.xsl"/>
+    </paths>
+    <logging>
+        <accesslog>access.log</accesslog>
+        <errorlog>error.log</errorlog>
+        <loglevel>3</loglevel>
+    </logging>
+    <http-headers>
+        <header name="Access-Control-Allow-Origin" value="*" />
+        <header name="Access-Control-Allow-Headers" value="Origin, Accept, X-Requested-With, Content-Type, Icy-MetaData" />
+        <header name="Access-Control-Allow-Methods" value="GET, OPTIONS, SOURCE" />
+    </http-headers>
+    <security>
+        <chroot>0</chroot>
+    </security>
+</icecast>

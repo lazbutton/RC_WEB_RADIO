@@ -1,0 +1,8 @@
+[Install]
+WantedBy=default.target
+
+[Kube]
+Yaml=%h/.config/containers/systemd/radiotomate_pod_manifest.yaml
+PublishPort=6800:6800
+PublishPort=6811:6811
+GlobalArgs=--storage-driver=overlay --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs

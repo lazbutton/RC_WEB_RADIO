@@ -1,0 +1,8 @@
+# GNU AFFERO GENERAL PUBLIC LICENSE
+
+This repository packages [Radiotomate](https://foss.heptapod.net/radiotomate/radiotomate/) (AGPL-3.0-or-later) and New Trad Radio operations / public UI.
+
+- Upstream license text: `radiotomate/LICENSE`
+- SPDX: AGPL-3.0-or-later
+
+If you run the public player, festival dashboard, or a modified Radiotomate as a network service, you must offer the corresponding source to users of that service.

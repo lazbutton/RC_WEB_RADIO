@@ -1,0 +1,41 @@
+---
+# Extrait à fusionner dans radiotomate_data/radiotomate.yaml
+# après install.sh (conserver cookie_salt et token générés).
+
+data:
+    root: /home/ntradio/radiotomate_data
+
+interface:
+    locale: fr
+    interface_name: "New Trad Radio"
+    minimum_password_length: 20
+    music_default_query: "grouping:rotation"
+
+playout_process_config:
+    input_name: "stream"
+    input_min_buffer: 5.
+    input_max_buffer: 30.
+    jingles_delay: 780.
+    autodj_artist_distance: 3600
+    outputs:
+        - driver: icecast
+          encoder: mp3cbr
+          quality: 128
+          host: "streams.labomedia.org"
+          port: 8443
+          mount: "ntradio.mp3"
+          password: "CHANGE_ME_SOURCE_PASSWORD"
+          # Si Icecast est sur la même machine que le pod :
+          # host: "host.containers.internal"
+
+metadata_log:
+    extra_fields:
+        - genre
+        - year
+        - grouping
+    relay_to:
+        - url: "http://127.0.0.1:6820/hook"
+          add_header:
+              Authorization: "Bearer CHANGE_ME_NOWPLAYING_SECRET"
+          add_field:
+              SOURCE_NAME: "new-trad-radio"

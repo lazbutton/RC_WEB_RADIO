@@ -1,0 +1,7 @@
+[Unit]
+Description=Healthcheck du flux radio (Icecast)
+After=radio.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/radio-healthcheck

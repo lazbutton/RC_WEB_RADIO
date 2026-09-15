@@ -1,0 +1,28 @@
+[Unit]
+Description=Liquidsoap - flux radio
+After=network-online.target sound.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=radio
+Group=audio
+EnvironmentFile=/etc/radio/radio.env
+ExecStartPre=/usr/bin/liquidsoap --check /srv/radio/radio.liq
+ExecStart=/usr/bin/liquidsoap /srv/radio/radio.liq
+Restart=always
+RestartSec=5
+TimeoutStartSec=180
+RuntimeDirectory=liquidsoap
+RuntimeDirectoryMode=0770
+Nice=-5
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/radio /var/log/liquidsoap
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source /etc/radio/radio.env
+
+# Pas d'Icecast réel : ne pas relancer le service en boucle
+case "${ICECAST_HOST:-}" in
+  ""|radio.exemple.org|change-me|localhost) exit 0 ;;
+esac
+
+THROTTLED=$(vcgencmd get_throttled)
+[ "$THROTTLED" = "throttled=0x0" ] || logger -t radio-healthcheck "$THROTTLED"
+
+ping -c1 -W3 1.1.1.1 >/dev/null 2>&1 || exit 0
+
+if ! curl -fsS --max-time 10 \
+     "http://${ICECAST_HOST}:${ICECAST_PORT}/status-json.xsl" \
+     | grep -q -- "${ICECAST_MOUNT}"; then
+  logger -t radio-healthcheck "Point de montage absent, redémarrage du service"
+  systemctl restart radio.service
+fi

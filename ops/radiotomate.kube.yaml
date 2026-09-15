@@ -1,0 +1,61 @@
+---
+# Manifest de référence (install.sh en génère un avec les vrais chemins).
+# INSTALL_QUADLET=no wget -O - https://radiotomate.org/install.sh | bash
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    io.podman.annotations.userns: keep-id
+  name: radiotomate
+spec:
+  containers:
+  - name: playout
+    image: localhost/radiotomate/playout:latest
+    command: ["liquidsoap", "/app/radiotomate.liq"]
+    env:
+      - name: RTCONFIG
+        value: /home/ntradio/radiotomate_data/radiotomate.yaml
+    volumeMounts:
+      - mountPath: /home/ntradio/radiotomate_data:z
+        name: data-volume
+    ports:
+      - containerPort: 6800
+        hostPort: 6800
+  - name: interface
+    image: localhost/radiotomate/webapps:latest
+    command: ["radiotomate", "interface"]
+    env:
+      - name: RTCONFIG
+        value: /home/ntradio/radiotomate_data/radiotomate.yaml
+      - name: BEETSDIR
+        value: /home/ntradio/radiotomate_data/Beets
+    volumeMounts:
+      - mountPath: /home/ntradio/radiotomate_data:z
+        name: data-volume
+    ports:
+      - containerPort: 6811
+        hostPort: 6811
+  - name: scheduler
+    image: localhost/radiotomate/webapps:latest
+    command: ["radiotomate", "scheduler"]
+    env:
+      - name: RTCONFIG
+        value: /home/ntradio/radiotomate_data/radiotomate.yaml
+      - name: BEETSDIR
+        value: /home/ntradio/radiotomate_data/Beets
+    volumeMounts:
+      - mountPath: /home/ntradio/radiotomate_data:z
+        name: data-volume
+  - name: dropbox
+    image: localhost/radiotomate/webapps:latest
+    command: ["beet", "dropbox"]
+    env:
+      - name: BEETSDIR
+        value: /home/ntradio/radiotomate_data/Beets
+    volumeMounts:
+      - mountPath: /home/ntradio/radiotomate_data:z
+        name: data-volume
+  volumes:
+    - name: data-volume
+      hostPath:
+        path: /home/ntradio/radiotomate_data

@@ -1,0 +1,18 @@
+.DS_Store
+.env
+ops/secrets.env
+ops/local/data/
+ops/local/now.json
+player/now.json
+player/node_modules/
+player/dist/
+console/node_modules/
+console/dist/
+__pycache__/
+*.pyc
+.venv/
+*.db
+*.db-*
+
+# Fork Radiotomate : dépôt git à part (branche ntr/theme), pas un gitlink.
+/radiotomate/

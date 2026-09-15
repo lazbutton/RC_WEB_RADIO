@@ -1,0 +1,36 @@
+# New Trad Radio — reverse proxy Labomedia
+# Remplacer radio.example.labomedia.org et les chemins.
+# Ports internes : 6811 interface, 6800 live harbor.
+
+radio.example.labomedia.org {
+	encode gzip
+
+	handle /stream* {
+		reverse_proxy 127.0.0.1:6800 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:6811
+	}
+}
+
+# Option : player public — servir le build Vite (`player/dist`)
+ntradio.example.org {
+	header Content-Security-Policy "frame-ancestors 'self' https://newtradfest.com https://*.newtradfest.com"
+	root * /var/www/ntradio-public
+	file_server
+	handle /now.json {
+		reverse_proxy 127.0.0.1:6820
+	}
+	# Oscilloscope : flux same-origin pour MediaElementSource
+	# (évite de dépendre des CORS Icecast Labomedia).
+	# Dans dist/config.js : streamUrl: "/ntradio.mp3"
+	handle /ntradio.mp3 {
+		reverse_proxy https://streams.labomedia.org:8443 {
+			header_up Host streams.labomedia.org
+			flush_interval -1
+		}
+	}
+}

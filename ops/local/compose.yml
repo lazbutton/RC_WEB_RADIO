@@ -1,0 +1,23 @@
+services:
+  icecast:
+    build:
+      context: .
+      dockerfile: Dockerfile.icecast
+    ports:
+      - "18000:8000"
+    restart: unless-stopped
+
+  nowplaying:
+    image: python:3.13-slim-bookworm
+    working_dir: /app
+    command: ["python", "/app/nowplaying.py"]
+    environment:
+      RT_NOWPLAYING_PORT: "6820"
+      RT_NOWPLAYING_SECRET: ntr-dev-secret
+      RT_NOWPLAYING_FILE: /data/now.json
+    volumes:
+      - ./nowplaying.py:/app/nowplaying.py:ro
+      - ./data:/data
+    ports:
+      - "6820:6820"
+    restart: unless-stopped
