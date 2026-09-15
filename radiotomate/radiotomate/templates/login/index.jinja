@@ -1,0 +1,31 @@
+{% extends 'layout.jinja' %}
+{% block title %}Connexion{% endblock title %}
+
+{% from 'macros.jinja' import password_field %}
+{% block content %}
+<main class="ntr-login">
+    <form method="POST"
+        class="ntr-login-card"
+        hx-post="{{ url_for('login.log_in') }}"
+        hx-disabled-elt="find button[type=submit]"
+        >
+        <div class="ntr-login-brand">
+            <img src="{{ url_for('static', filename='logo-ntr.svg') }}" alt="">
+            <h1>New Trad Radio</h1>
+            <p>Accès studio</p>
+        </div>
+        <div class="field">
+            <label for="username" class="label">Identifiant</label>
+            <div class="control">
+                <input type="text" name="username" id="username" class="input" autocomplete="username" required>
+            </div>
+        </div>
+        {{ password_field("Mot de passe", stacked=true) }}
+        <div class="field">
+            <button type="submit" class="button is-primary">
+                Entrer
+            </button>
+        </div>
+    </form>
+</main>
+{% endblock content %}

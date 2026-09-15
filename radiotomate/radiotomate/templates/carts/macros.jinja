@@ -1,0 +1,135 @@
+{% from 'macros.jinja' import audio_player %}
+
+{% macro cart_summary(cart, swap=True) %}
+    <span id="cartsummary-{{ cart.id }}"
+        {% if swap %}hx-swap-oob="true"{% endif %}
+        >
+        {{ cart.sounds_count }} son{{ 's' if cart.sounds_count > 1 else '' }}
+        {% if cart.inactive_sounds_count %}
+            ({{ cart.inactive_sounds_count }} inactif{{ 's' if cart.inactive_sounds_count > 1 else '' }})
+        {% endif %}
+    </span>
+{% endmacro %}
+
+{% macro next_tag(sound, next_id, swap=True) %}
+    <span id="isnext-{{ sound.id }}"
+        {% if swap %}hx-swap-oob="true"{% endif %}
+        {% if sound.gain == None %} {# until replaygain is computed, a sound can't be next #}
+            class="tag is-warning"
+        >
+            Analyse
+        {% else %}
+            {% if sound.id == next_id %}
+                class="tag is-primary"
+                title="Ce son sera diffusé ensuite"
+            {% else %}
+                aria-hidden="true"
+                style="visibility: hidden"{# this avoids flickering when refreshind tags #}
+            {% endif %}
+            >
+                Suivant
+        {% endif %}
+    </span>
+{% endmacro %}
+
+{% macro sound_rank(sound, swap=True) %}
+    <span id="rank-{{ sound.id }}"
+        {% if swap %}hx-swap-oob="true"{% endif %}
+        >
+        {{ sound.rank }}
+    </span>
+{% endmacro %}
+
+{% macro sound_lines(sounds, next_id, cart_mode, editable) %}
+    {% for sound in sounds %}
+        <tr class="fade-in fade-out" title="{{ sound.title }}">
+            {% if cart_mode != CartMode.RANDOM %}
+                <td class="has-text-centered {% if editable %}draghandle{% endif %}">
+                    {% if editable %}
+                        <input type='hidden' class='rankinputs' name='rank' value='{{ sound.id }}'/>
+                    {% endif %}
+                    <span aria-hidden="true">::</span>
+                    {{ sound_rank(sound, swap=False) }}
+                </td>
+            {% endif %}
+            <td>
+                {{ audio_player(url_for('carts.download_sound', cart_id=sound.cart_id, sound_id=sound.id)) }}
+            </td>
+            <td>
+                {{ duration_span(sound.duration) }}
+            </td>
+            <td class="field">
+                <div class="control has-icons-right">
+                    {% if editable %}
+                        <input type="text"
+                            class="input is-fullwidth"
+                            name="title"
+                            aria-label="titre"
+                            autocomplete="off"
+                            value="{{ sound.title }}"
+                            hx-put="{{ url_for('carts.edit_sound', cart_id=sound.cart_id, sound_id=sound.id) }}"
+                            hx-trigger="click from:next button, keyup[key==='Enter']"
+                            hx-target="closest tr"{# we need to update the <tr title... too #}
+                            hx-swap="outerHTML"
+                        >
+                        <button class="icon is-clickable is-right" name="Enregistrer" aria-label="Enregistrer">
+                            {{ icon('💾') }}
+                        </button>
+                    {% else %}
+                        {{ sound.title }}
+                    {% endif %}
+                </div>
+            </td>
+            <td>
+                {{ sound.last_played if sound.last_played else 'Jamais diffusé' }}
+                {{ next_tag(sound, next_id, swap=False) }}
+            </td>
+            <td class="has-text-centered">
+                {% if sound.uploader %}
+                    {{ sound.uploader.username }}
+                {% endif %}
+            </td>
+            <td class="field has-text-centered">
+                <input type="hidden" name="active" value="">{# with the next hx-include, ensures the browser sends something for "active" #}
+                <input type="checkbox"
+                    name="active"
+                    aria-label="actif"
+                    value="true"
+                    autocomplete="off"
+                    {{ 'checked' if sound.active else '' }}
+                    {{ 'disabled' if not editable else '' }}
+                    hx-put="{{ url_for('carts.edit_sound', cart_id=sound.cart_id, sound_id=sound.id) }}"
+                    hx-include="previous input"
+                    hx-trigger="change"
+                    hx-swap="none"
+                    >
+            </td>
+            {% if editable %}
+            <td class="has-text-centered" x-data="{}">
+                <button title="Supprimer" aria-label="Supprimer"
+                    hx-delete="{{ url_for('carts.delete_sound', cart_id=sound.cart_id, sound_id=sound.id) }}"
+                    hx-on::confirm="confirmWithMessage(`Supprimer le son {{sound.title}} ?`)"
+                    hx-swap="outerHTML"
+                    hx-target="closest tr"
+                >
+                    {{ icon('❌') }}
+                </button>
+                {% if cart_mode != CartMode.RANDOM %}
+                    <button title="Monter"
+                        aria-label="Monter"
+                        @click="moveSound($event, true)"
+                        >
+                        {{ icon('⬆️') }}
+                    </button>
+                    <button title="Descendre"
+                        aria-label="Descendre"
+                        @click="moveSound($event, false)"
+                        >
+                        {{ icon('⬇️') }}
+                    </button>
+                {% endif %}
+            </td>
+            {% endif %}
+        </tr>
+    {% endfor %}
+{% endmacro %}

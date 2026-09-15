@@ -1,0 +1,19 @@
+FROM docker.io/savonet/liquidsoap:v2.4.0
+
+LABEL Description="Playout service for the radiotomate broadcast automation system."
+
+# Note: we only expose the Harbor input because it's the only one that should be
+# reachable from the Internet. Playout's API endpoints are bound to another port that
+# should only be reachable to other Radiotomate services, inside the pod.
+EXPOSE 6800
+
+ENV RADIOTOMATE_HOME=/app
+ENV RADIOTOMATE_USER=rtuser
+
+USER root
+RUN useradd -md $RADIOTOMATE_HOME -s /bin/bash $RADIOTOMATE_USER
+USER $RADIOTOMATE_USER
+
+COPY radiotomate.liq /app/radiotomate.liq
+
+ENTRYPOINT /usr/bin/liquidsoap /app/radiotomate.liq

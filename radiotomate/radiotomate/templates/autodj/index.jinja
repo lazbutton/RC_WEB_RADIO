@@ -1,0 +1,61 @@
+{% extends 'layout.jinja' %}
+{% block title %}Auto-DJ{% endblock title %}
+
+{% from 'autodj/macros.jinja' import autodj_slot %}
+{% from 'macros.jinja' import jour_label %}
+{% set can_autodj = current_user.user.can_autodj() %}
+
+{% block content %}
+<section class="content">
+<div class="container">
+    <h1>
+        Auto-DJ
+    </h1>
+
+{% if can_autodj %}
+<p>
+    <a
+        class="button is-primary"
+        href="{{ url_for('autodj.add_form')}}"
+        aria-label="Nouveau créneau"
+        >
+        Nouveau créneau
+    </a>
+</p>
+{% endif %}
+
+<div class="columns" id="autodjschedule">
+    {% for day in day_names %}
+        <section class="column" role="region" aria-labelledby="day_name_{{day.value}}">
+            <header aria-hidden="true">
+                <h2 id="day_name_{{day.value}}" class="title is-4">
+                    {{ jour_label(day) }}
+                </h2>
+            </header>
+            <div class="schedule" style="height: {{ 24*REM_PER_HOUR }}rem;">
+                {% for slot in slots_per_day[day.value] %}
+                    {{ autodj_slot(slot, can_autodj) }}
+                {% endfor %}
+            </div>
+        </section>
+    {% endfor %}
+</div>
+
+<p class="ntr-help">
+    Chaque créneau tire un morceau dans Beets. Le <strong>poids</strong> d’un filtre
+    décide de sa chance d’être choisi. Si le filtre est trop restrictif, l’auto-DJ
+    retombe sur <strong>toute la bibliothèque</strong>.
+</p>
+<p class="ntr-help">
+    Taxonomie NTR (aide de saisie, pas une règle du moteur) :
+    <code>grouping:rotation</code> (rotation 24/24),
+    <code>grouping:ntf1</code> / <code>ntf2</code> / <code>ntf3</code> (archives d’édition),
+    <code>added:-3m..</code> (ajouts récents).
+    Syntaxe :
+    <a href="https://beets.readthedocs.io/en/stable/reference/query.html" target="_blank" rel="noopener">requêtes Beets</a>.
+</p>
+
+</div>
+</section>
+
+{% endblock %}

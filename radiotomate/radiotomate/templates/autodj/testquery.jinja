@@ -1,0 +1,47 @@
+{% from 'macros.jinja' import audio_player %}
+
+<h2
+    id="test-results-header"
+    {% if not results %}
+    class="has-text-danger"
+    {% endif %}
+    >
+    Test du filtre : {{ nb_results }} résultat{{ 's' if nb_results != 1 else '' }}
+</h2>
+{% if results %}
+<table class="table is-fullwidth is-striped is-hoverable">
+    <thead>
+        <tr><th colspan="3">
+            Échantillon pour le filtre <code>{{ query }}</code> :
+        </th></tr>
+    </thead>
+    <tfoot>
+        <tr><th colspan="3">
+            <input type="hidden" name="filters[][filter]" value="{{ query }}">
+            <button
+                class="button is-primary"
+                hx-trigger="click"
+                hx-get="{{ url_for('autodj.testquery') }}"
+                hx-target="#test-results"
+                hx-include="previous input"
+                >
+                Nouvel échantillon
+            </button>
+            <button class="button is-danger" x-on:click="closeTest()">
+                Fermer
+            </button>
+        </th></tr>
+    </tfoot>
+    <tbody>
+        {% for item in results %}
+        <tr>
+            <td>{{ item.artist }}</td>
+            <td>{{ item.title }}</td>
+            <td>{{ audio_player(url_for('library.download', item_id=item.id)) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+
+</table>
+
+{% endif %}

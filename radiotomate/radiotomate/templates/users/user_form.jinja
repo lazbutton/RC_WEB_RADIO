@@ -1,0 +1,86 @@
+{% extends 'layout.jinja' %}
+{% set title = "Modifier le compte" if user else "Nouveau compte" %}
+{% block title %}{{ title }}{% endblock title %}
+
+{% from 'macros.jinja' import password_field %}
+{% from 'users/macros.jinja' import permission_input %}
+{% block content %}
+<section class="content">
+<div class="container">
+<h1 aria-hidden="true" id="page_title">
+    {{ title }}
+</h1>
+
+<form aria-labelledby="page_title">
+    <div class="field is-horizontal">
+        <div class="field-label">
+            <label for="username" class="label">Identifiant</label>
+        </div>
+        <div class="field-body">
+            <div class="field">
+                <div class="control">
+                    <input type="text" name="username" id="username" class="input" value="{{ user.username if user else '' }}" required>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="field is-horizontal">
+        <div class="field-label">
+            <label for="notes" class="label">Notes</label>
+        </div>
+        <div class="field-body">
+            <div class="field">
+                <div class="control">
+                    <textarea name="notes" id="notes" class="textarea">{{ user.notes if user else '' }}</textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{ password_field("Changer le mot de passe" if user else "Mot de passe", autocomplete="new-password") }}
+
+    <fieldset>
+        <h2>Droits</h2>
+        {{ permission_input(user, 'can_admin', "Peut tout faire, notamment modifier les réglages et les comptes.", "Administration") }}
+        {{ permission_input(user, 'can_stream', "Peut prendre l’antenne en envoyant un flux live. Identifiant et mot de passe doivent être fournis dans l’application d’encodage.", "Direct") }}
+        {{ permission_input(user, 'can_live', "Actions sur la page Antenne : passer le morceau, modifier les métadonnées.", "Antenne") }}
+        {{ permission_input(user, 'can_carts', "Peut modifier les carts et les sons qu’ils contiennent.", "Carts") }}
+        {{ permission_input(user, 'can_autodj', "Peut modifier la bibliothèque et la grille Auto-DJ.", "Auto-DJ") }}
+        {{ permission_input(user, 'can_not_audio', "Désactive les lecteurs audio dans l’interface (remplacés par 🔇). Utile pour un compte d’affichage d’antenne.", "Sans audio") }}
+    </fieldset>
+
+    {% set submitValue = "Enregistrer" if user else "Ajouter" %}
+    <div class="field is-horizontal">
+        <div class="field-label"></div>
+        <div class="field-body">
+            <div class="field is-grouped">
+                <div class="control">
+                    <button
+                        type="submit" class="button is-primary"
+                        {% if user %}
+                            hx-put="{{ url_for('users.edit', user_id=user.id)}}"
+                        {% else %}
+                            hx-post="{{ url_for('users.add')}}"
+                        {% endif %}
+                        aria-label="{{ submitValue }}"
+                    >
+                        {{ submitValue }}
+                    </button>
+                </div>
+                <div class="control">
+                    <a
+                        class="button is-danger"
+                        href="{{ url_for('users.index') }}"
+                        aria-label="Annuler"
+                        >
+                        Annuler
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+</section>
+</div>
+{% endblock content %}

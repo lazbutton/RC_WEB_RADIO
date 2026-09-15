@@ -1,0 +1,74 @@
+@use "bulma/sass" with (
+  $family-primary: 'AtkinsonHyperlegible, Inter, SF Pro, Segoe UI, Roboto, Oxygen, Ubuntu, Helvetica Neue, Helvetica, Arial, sans-serif',
+  $family-secondary: 'AtkinsonHyperlegible, Inter, SF Pro, Segoe UI, Roboto, Oxygen, Ubuntu, Helvetica Neue, Helvetica, Arial, sans-serif',
+  $primary: #6b2d1a
+);
+@use "ntr";
+@use 'bulma/sass/utilities/mixins' as mixins;
+
+.is-active {
+    font-weight: bold;
+}
+
+.fade-out.htmx-swapping {
+    opacity: 0;
+    transition: opacity .25s ease-out;
+}
+
+.fade-in.htmx-added,
+.fade-in.htmx-settling {
+    opacity: 0;
+}
+
+.fade-in {
+    opacity: 1;
+    transition: opacity .25s ease-out;
+}
+
+.draghandle {
+    cursor: grab;
+}
+
+// use with:
+// hx-indicator="next .htmx-indicator"
+// ...
+// <span class="htmx-indicator" aria-label="loading"></span>
+.htmx-indicator{
+    display:none;
+    opacity:0;
+    transition: opacity 500ms ease-in;
+}
+
+.htmx-request .htmx-indicator{
+    display:inline;
+    opacity:1;
+    @include mixins.loader;
+}
+
+.htmx-request.htmx-indicator{
+    display:inline;
+    opacity:1;
+    @include mixins.loader;
+}
+
+#autodjschedule header * {
+    overflow: hidden;
+    text-wrap: nowrap;
+}
+
+#autodjschedule .schedule {
+    position: relative;
+}
+
+#autodjschedule article {
+    position: relative;
+}
+
+#autodjschedule article p,time {
+    display: inline;
+    overflow: hidden;
+}
+
+#soundsrows audio {
+    max-width: 200px;
+}

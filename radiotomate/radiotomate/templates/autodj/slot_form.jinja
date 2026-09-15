@@ -1,0 +1,217 @@
+{% from 'autodj/macros.jinja' import filtertemplate %}
+{% from 'macros.jinja' import jour_label %}
+{% extends 'layout.jinja' %}
+{% set title = "Modifier le créneau" if slot else "Nouveau créneau Auto-DJ" %}
+{% block title %}{{ title }}{% endblock title %}
+
+{% block content %}
+<section class="content">
+<div class="container">
+<h1 aria-hidden="true" id="slot_title">
+    {{ title }}
+</h1>
+
+<form
+    aria-labelledby="slot_title"
+    x-data
+    x-on:submit.prevent="" {# avoid any default submit (eg. when clicking on a button) #}
+    >
+    <div class="field is-horizontal">
+        <div class="field-label">
+            <label for="title" class="label">Titre</label>
+        </div>
+        <div class="field-body">
+            <div class="field">
+                <div class="control">
+                    <input type="text" name="title" id="title" class="input" value="{{ slot.title if slot else '' }}" required>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="field is-horizontal">
+        <div class="field-label">
+            <label for="color" class="label">Couleur</label>
+        </div>
+        <div class="field-body">
+            <div class="field">
+                <div class="control">
+                    <input type="color" name="color" id="color" class="input" value="{{ color }}" required>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="field is-horizontal">
+        <div class="field-label">
+            <label for="day_of_week" class="label">Jour</label>
+        </div>
+        <div class="field-body">
+            <div class="field">
+                <div class="control select">
+                    <select id="day_of_week" name="day_of_week" required>
+                        {% if not slot %}
+                            <option value="">Choisir…</option>
+                            <option value="*">Tous les jours</option>
+                        {% endif %}
+                        {% for day in day_names %}
+                            <option value="{{ day.value }}" {{ 'selected' if slot and slot.day_of_week == day.value else '' }}>
+                                {{ jour_label(day) }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="field is-horizontal">
+        <div class="field-label">
+            <label for="max_duration" class="label">Horaire</label>
+        </div>
+        <div class="field-body">
+            <div class="field has-addons">
+                <div class="control">
+                    <input type="number" class="input" name="hour" placeholder="hour" value="{{
+                        (slot.minute // 60) if slot else ''
+                    }}">
+                </div>
+                <div class="control" aria-hidden="true">
+                    <a class="button is-static">
+                        :
+                    </a>
+                </div>
+                <div class="control">
+                    <input type="number" class="input" name="minute" placeholder="minutes" value="{{
+                        (slot.minute % 60) if slot else ''
+                    }}">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="field is-horizontal">
+        <div class="field-label">
+            <label class="label">
+                Filtres
+            </label>
+        </div>
+        <div class="field-body">
+            <p>
+                Les morceaux de ce créneau sont filtrés par les
+                <a href="https://beets.readthedocs.io/en/stable/reference/query.html" target="_blank" rel="noopener">
+                requêtes Beets</a>
+                éventuelles.
+                Si plusieurs filtres sont fournis, l’un d’eux est tiré au hasard selon son <strong>poids</strong>.
+                Un filtre trop restrictif fait retomber l’auto-DJ sur toute la bibliothèque.
+            </p>
+            <p class="help">
+                Exemples NTR : <code>grouping:rotation</code>,
+                <code>grouping:ntf1</code> (ou ntf2, ntf3),
+                <code>added:-3m..</code>.
+            </p>
+        </div>
+    </div>
+
+    <template id="filtertemplate">
+        {{ filtertemplate(None) }}
+    </template>
+
+    <div id="filterslist" class="field">
+        {% if slot and slot.constraints and slot.constraints['filters'] %}
+            {% for f in slot.constraints['filters'] %}
+                {{ filtertemplate(f) }}
+            {% endfor %}
+        {% endif %}
+    </div>
+
+    <div class="field is-horizontal">
+        <div class="field-label"></div>
+        <div class="field-body">
+            <div class="control">
+                <button
+                    class="button is-primary"
+                    x-on:click="addFilter()"
+                    aria-labelledby="add_filter_label"
+                    >
+                    <span id="add_filter_label">
+                        Ajouter un filtre
+                    </span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="field is-horizontal">
+        <div class="field-label"></div>
+        <div class="field-body">
+            <div class="field is-grouped">
+                <div class="control">
+                    <button
+                        type="submit" class="button is-primary"
+                        {% if slot %}
+                            hx-put="{{ url_for('autodj.edit', slot_id=slot.id)}}"
+                        {% else %}
+                            hx-post="{{ url_for('autodj.add')}}"
+                        {% endif %}
+                        aria-label="Enregistrer"
+                    >
+                        Enregistrer
+                    </button>
+                </div>
+                <div class="control">
+                    <a
+                        class="button is-info"
+                        href="{{ url_for('autodj.index') }}"
+                        aria-label="Annuler"
+                        >
+                        Annuler
+                    </a>
+                </div>
+
+                {% if slot and slot.minute > 0 %}
+                <div class="control">
+                    <button
+                        class="button is-danger"
+                        hx-delete="{{ url_for('autodj.delete', slot_id=slot.id) }}"
+                        hx-on::confirm="confirmWithMessage(`Supprimer {{ slot.title }} ?`)"
+                        aria-label="Supprimer"
+                    >
+                        Supprimer
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</form>
+
+<aside id="test-results" aria-labelledby="test-results-header"></aside>
+
+</div>
+</section>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+    function addFilter() {
+        const filterslist = document.querySelector("#filterslist");
+        const template = document.querySelector("#filtertemplate");
+        let clone = template.content.cloneNode(true);
+        htmx.process(clone);
+        filterslist.appendChild(clone);
+    }
+
+    function removeFilter(event) {
+        const line = event.target.closest("div.is-horizontal");
+        line.remove();
+    }
+
+    function closeTest() {
+        const container = document.querySelector("#test-results");
+        container.innerHTML = '';
+    }
+
+</script>
+{% endblock scripts %}

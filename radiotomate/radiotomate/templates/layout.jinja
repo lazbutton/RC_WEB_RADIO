@@ -1,0 +1,99 @@
+{% from 'macros.jinja' import menu_item %}
+<!doctype html>
+<html lang="fr">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{% block title %}{% endblock %} — New Trad Radio</title>
+        <link rel="icon" type="image/svg+xml" href="{{ url_for("static", filename="logo-ntr.svg") }}">
+        <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for("static", filename="logo/favicon-32x32.png") }}">
+        <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for("static", filename="logo/favicon-16x16.png") }}">
+        <link rel="shortcut icon" href="{{ url_for("static", filename="favicon.ico") }}"/>
+        <link href="{{ url_for("static", filename="AtkinsonHyperlegible/AtkinsonHyperlegible.css") }}" rel="stylesheet">
+        <link href="{{ url_for("static", filename="radiotomate.css") }}" rel="stylesheet">
+        <link href="{{ url_for("static", filename="ntr.css") }}" rel="stylesheet">
+        <script defer src="{{ url_for("static", filename="htmx.min.js") }}"></script>
+        <script defer src="{{ url_for("static", filename="htmx-sse.js") }}"></script>
+        <script defer src="{{ url_for("static", filename="sweetalert2-11.7.31.js") }}"></script>
+        <script defer src="{{ url_for("static", filename="alpinejs-3.13.0.min.js") }}"></script>
+    </head>
+    <body class="ntr-body{% if current_user.is_authenticated %} ntr-console{% else %} ntr-guest{% endif %}"
+        x-data="{ sidebarOpen: false }"
+        >
+
+        {% if current_user.is_authenticated %}
+        <div class="ntr-sidebar-backdrop"
+            :class="{ 'is-visible': sidebarOpen }"
+            @click="sidebarOpen = false"
+            ></div>
+
+        <aside class="ntr-sidebar" :class="{ 'is-open': sidebarOpen }" aria-label="Navigation antenne">
+            <a class="ntr-brand" href="{{ url_for('home.index') }}">
+                <img src="{{ url_for("static", filename="logo-ntr.svg") }}" alt="">
+                <span class="ntr-brand-text">
+                    <span class="ntr-brand-name">{{ config['INTERFACE_NAME'] }}</span>
+                    <span class="ntr-brand-sub">Console d’antenne</span>
+                </span>
+            </a>
+
+            <nav class="ntr-nav" aria-label="Console">
+                {{ menu_item("home.index", "Antenne", in_blueprint('home')) }}
+                {{ menu_item("carts.index", "Carts", in_blueprint('carts')) }}
+                {{ menu_item("autodj.index", "Auto-DJ", in_blueprint('autodj')) }}
+                {% if current_user.user.can_admin() %}
+                    {{ menu_item("users.index", "Comptes", in_blueprint('users')) }}
+                {% endif %}
+                <div class="ntr-sidebar-foot">
+                    <p class="ntr-sidebar-user">{{ current_user.user.username }}</p>
+                    {{ menu_item("account.index", "Mon compte", in_blueprint('account')) }}
+                    <a class="ntr-nav-item ntr-nav-item--quiet" href="{{ url_for('login.log_out') }}">
+                        Déconnexion
+                    </a>
+                </div>
+            </nav>
+        </aside>
+
+        <div class="ntr-workspace">
+            <header class="ntr-topbar">
+                <button type="button"
+                    class="ntr-menu-toggle"
+                    aria-label="Ouvrir le menu"
+                    :aria-expanded="sidebarOpen.toString()"
+                    @click="sidebarOpen = !sidebarOpen"
+                    >
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+                <p id="ntr-onair" class="ntr-onair is-standby" aria-label="STANDBY">
+                    <span class="ntr-onair-dot" aria-hidden="true"></span>
+                    <span class="ntr-onair-label">STANDBY</span>
+                </p>
+                <p class="ntr-topbar-title">{{ self.title() }}</p>
+                <p class="ntr-topbar-user">{{ current_user.user.username }}</p>
+            </header>
+            <div class="ntr-page{% if in_blueprint('home') %} ntr-page--live{% endif %}">
+        {% else %}
+        <nav class="ntr-guest-nav" aria-label="Console">
+            <a href="{{ url_for('login.log_in') }}" {% if in_blueprint('login') %}aria-current="page"{% endif %}>
+                Connexion
+            </a>
+        </nav>
+        {% endif %}
+
+                {% block content %}{% endblock %}
+
+        {% if current_user.is_authenticated %}
+            </div>
+        </div>
+        {% endif %}
+
+        <script defer src="{{ url_for("static", filename="radiotomate.js") }}"></script>
+        <script>
+            document.addEventListener("DOMContentLoaded", function() {
+                htmx.config.defaultSwapDelay = {{ transitions_delay_ms }};
+            });
+        </script>
+        {% block scripts %}{% endblock %}
+    </body>
+</html>

@@ -1,0 +1,115 @@
+{% macro source_badge(source) %}
+{%- set raw = (source or '')|string -%}
+{%- set key = raw|lower -%}
+{%- if key in ['stream', 'live'] -%}
+<span class="ntr-source ntr-source--live">Direct</span>
+{%- elif key in ['autodj', 'auto-dj'] -%}
+<span class="ntr-source ntr-source--autodj">Auto-DJ</span>
+{%- elif key in ['carts', 'cart'] or key.startswith('cart') -%}
+<span class="ntr-source ntr-source--cart">Cart</span>
+{%- elif key == 'relay' -%}
+<span class="ntr-source ntr-source--cart">Relais</span>
+{%- elif key == 'jingles' -%}
+<span class="ntr-source ntr-source--autodj">Jingle</span>
+{%- elif raw -%}
+<span class="ntr-source">{{ raw }}</span>
+{%- endif -%}
+{% endmacro %}
+
+{% macro onair_banner(source) %}
+{%- set key = (source or '')|string|lower -%}
+{%- if key in ['stream', 'live'] -%}
+{%- set state, label = 'is-live', 'ON AIR' -%}
+{%- elif key in ['autodj', 'auto-dj'] -%}
+{%- set state, label = 'is-auto', 'AUTO' -%}
+{%- elif key in ['carts', 'cart'] or key.startswith('cart') -%}
+{%- set state, label = 'is-cart', 'CART' -%}
+{%- elif key == 'relay' -%}
+{%- set state, label = 'is-cart', 'RELAIS' -%}
+{%- elif key == 'jingles' -%}
+{%- set state, label = 'is-auto', 'JINGLE' -%}
+{%- elif key -%}
+{%- set state, label = 'is-standby', key|upper -%}
+{%- else -%}
+{%- set state, label = 'is-standby', 'STANDBY' -%}
+{%- endif -%}
+<p id="ntr-onair" hx-swap-oob="true" class="ntr-onair {{ state }}" aria-label="{{ label }}">
+    <span class="ntr-onair-dot" aria-hidden="true"></span>
+    <span class="ntr-onair-label">{{ label }}</span>
+</p>
+{% endmacro %}
+
+{% macro cue_line(label, item) %}
+<div class="ntr-cue">
+    <span class="ntr-cue-label">{{ label }}</span>
+    <span class="ntr-cue-value">
+        {%- if not item or item.rid == -1 -%}
+        —
+        {%- else -%}
+            {%- set artist = item.artist or '' -%}
+            {%- set title = item.title or '' -%}
+            {%- if artist and title -%}
+                {{ artist }} — {{ title }}
+            {%- elif artist or title -%}
+                {{ artist or title }}
+            {%- else -%}
+                en file
+            {%- endif -%}
+        {%- endif -%}
+    </span>
+</div>
+{% endmacro %}
+
+{% macro nowplayling(data, remaining) %}
+{{ onair_banner(data.source) }}
+<div class="ntr-desk {% if 5 >= remaining and remaining > 0 %}ntr-desk--ending{% endif %}">
+    <div class="ntr-desk-toolbar">
+        <span id="skipbutton" hx-preserve></span>
+        <div class="ntr-clock">
+            {# two separated spans because "date" is very stable, so reading time will be faster in screenreaders #}
+            <span role="timer" aria-label="date">
+                {{ data.date }}
+            </span>
+            <span role="timer" aria-label="heure">
+                {{ data.time }}
+            </span>
+        </div>
+    </div>
+    <div class="ntr-nowplaying">
+        <p class="ntr-nowplaying-artist" role="main">
+            {{ data.artist }}
+        </p>
+        {% if data.title %}
+        <p class="ntr-nowplaying-title">
+            {{ data.title }}
+        </p>
+        {% endif %}
+        <div class="ntr-source-row">
+            {{ source_badge(data.source) }}
+        </div>
+        <div class="ntr-cues" aria-label="File d’attente">
+            {{ cue_line("Prochain cart", data.next_cart) }}
+            {{ cue_line("Prochain auto-DJ", data.next_autodj) }}
+            {{ cue_line("Prochain jingle", data.next_jingle) }}
+        </div>
+    </div>
+    <div class="ntr-timers">
+        <div>
+            {% if data.elapsed %}
+            <span class="ntr-timers-label">Écoulé</span>
+            <span role="timer" aria-label="écoulé">
+                {{ duration_span(data.elapsed) }}
+            </span>
+            {% endif %}
+        </div>
+        <div>
+            {% if remaining %}
+            <span class="ntr-timers-label">Restant</span>
+            <span role="timer" aria-label="restant">
+                −{{ duration_span(remaining) }}
+            </span>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endmacro %}

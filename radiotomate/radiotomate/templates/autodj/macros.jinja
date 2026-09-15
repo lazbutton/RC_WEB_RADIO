@@ -1,0 +1,76 @@
+{% macro autodj_slot(slot, editable) %}
+{% set labelContainer = "title_slot_" if slot.title else "time_slot_" %}
+<article
+    style="height: {{ slot.height }}rem; background-color: {{ slot.color }}"
+    aria-labelledby="{{ labelContainer }}{{ slot.id }}"
+    >
+    {% if editable %}
+    <a title="Modifier" href="{{ url_for('autodj.get', slot_id=slot.id) }}">
+    {% endif %}
+        <div class="has-text-current">
+            <time id="time_slot_{{ slot.id }}" datetime="{{ slot.display_time }}">
+                {{ slot.display_time }}
+            </time>
+            <p id="title_slot_{{ slot.id }}">
+                {{ slot.title }}
+            </p>
+        </div>
+    {% if editable %}
+    </a>
+    {% endif %}
+</article>
+{% endmacro %}
+
+{% macro filtertemplate(filter) %}
+<div class="field is-horizontal">
+    <div class="field-label"></div>
+    <div class="field-body">
+        <div class="field has-addons">
+            <div class="control">
+                <input
+                    type="number"
+                    class="input"
+                    name="filters[][weight]"
+                    placeholder="weight"
+                    value="{{ filter[0] if filter else '1' }}"
+                >
+            </div>
+            <div class="control is-expanded">
+                <input
+                    type="text"
+                    class="input"
+                    name="filters[][filter]"
+                    placeholder="filter"
+                    value="{{ filter[1] if filter else '' }}"
+                    required
+                >
+            </div>
+            <div class="control">
+                <button
+                    class="button is-primary"
+                    hx-trigger="click"
+                    hx-get="{{ url_for('autodj.testquery') }}"
+                    hx-target="#test-results"
+                    hx-include="previous input"
+                    aria-labelledby="test_filter_label"
+                    >
+                    <span id="test_filter_label">
+                        Tester
+                    </span>
+                </button>
+            </div>
+            <div class="control">
+                <button
+                    class="button is-danger"
+                    x-on:click="removeFilter($event)"
+                    aria-labelledby="remove_filter_label"
+                    >
+                    <span id="remove_filter_label">
+                        Retirer
+                    </span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}

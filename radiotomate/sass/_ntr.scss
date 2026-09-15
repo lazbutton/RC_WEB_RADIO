@@ -1,0 +1,9 @@
+// Overlay also shipped as static/ntr.css so --demo picks it up without a Sass rebuild.
+// Keep tokens in sync with radiotomate/static/ntr.css.
+
+:root {
+  --ntr-bg: #120c0a;
+  --ntr-surface: #1c1512;
+  --ntr-paper: #f4e4c1;
+  --ntr-earth: #6b2d1a;
+}

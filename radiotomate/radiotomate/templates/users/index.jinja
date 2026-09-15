@@ -1,0 +1,64 @@
+{% extends 'layout.jinja' %}
+{% block title %}Comptes{% endblock title %}
+
+{% block content %}
+<section class="content">
+<div class="container">
+<h1>
+    Comptes
+</h1>
+<p>
+    <a
+        class="button is-primary"
+        href="{{ url_for('users.add_form')}}"
+        aria-label="Nouveau compte"
+        >
+        Nouveau compte
+    </a>
+</p>
+
+<table class="table is-fullwidth is-striped is-hoverable" aria-label="Liste des comptes">
+    <thead>
+        <tr>
+            <th scope="col">Identifiant</th>
+            <th scope="col">Notes</th>
+            <th scope="col">Droits</th>
+            <th scope="col">Créé</th>
+            <th scope="col">Modifié</th>
+            <th scope="col">Actions</th>
+        </tr>
+    </thead>
+    <tbody id="usersrows">
+        {% for user in users %}
+            <tr class="fade-in fade-out">
+                <td>
+                    <a title="Modifier" href="{{ url_for('users.get', user_id=user.id) }}">
+                        {{ user.username }}
+                    </a>
+                </td>
+                <td>{{ user.notes }}</td>
+                <td>
+                    {{ ', '.join(user.permissions.keys()) }}
+                </td>
+                <td>{{ date_span(user.created) }}</td>
+                <td>{{ date_span(user.modified) }}</td>
+                <td>
+                    <a title="Modifier" href="{{ url_for('users.get', user_id=user.id) }}">
+                        {{ icon('✏️') }}
+                    </a>
+                    <button title="Supprimer"
+                        hx-delete="{{ url_for('users.delete', user_id=user.id) }}"
+                        hx-on::confirm="confirmWithMessage(`Supprimer le compte de {{user.username}} ?`)"
+                        hx-swap="outerHTML"
+                        hx-target="closest tr"
+                    >
+                        {{ icon('❌') }}
+                    </button>
+                </td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+</section>
+{% endblock content %}

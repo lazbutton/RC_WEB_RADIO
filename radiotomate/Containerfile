@@ -1,0 +1,50 @@
+# to optimize the total application size, let's keep the debian release in sync
+# with the one used by our Liquidsoap version (cf. playout/Containerfile)
+FROM docker.io/python:3.13-slim-bookworm
+
+LABEL Description="Playout service for the radiotomate broadcast automation system."
+
+EXPOSE 6811
+
+ENV PYTHONUNBUFFERED=1
+ENV RADIOTOMATE_HOME=/app
+ENV RADIOTOMATE_USER=rtuser
+
+# install dependencies as a separate step to improve caching
+# beets have many requirements!
+ENV BUILD_ONLY="build-essential python3-dev libavcodec-dev libavformat-dev libavutil-dev"
+RUN apt-get update \
+    && apt-get install -y \
+        ${BUILD_ONLY} \
+        ffmpeg \
+        lame \
+        flac
+
+# as a Python app, radiotomate runs in userland
+RUN useradd -md $RADIOTOMATE_HOME -s /bin/bash $RADIOTOMATE_USER
+USER $RADIOTOMATE_USER
+WORKDIR $RADIOTOMATE_HOME
+ENV VIRTUAL_ENV=$RADIOTOMATE_HOME/venv
+RUN python3 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+COPY poetry.lock pyproject.toml README.md ./
+RUN pip install -U --no-cache-dir \
+        poetry \
+        pip \
+    && poetry install --only main --no-root --no-directory \
+    # although we'll set BEETSDIR, beets still starts by looking in its default location
+    # and if that folder does not exist it will ask to create it *interectively*
+    && mkdir /app/beets
+
+# cleanup
+USER root
+RUN apt-get purge -y ${BUILD_ONLY} \
+    && apt autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+USER $RADIOTOMATE_USER
+
+# to improve caching: install radiotomate last. Then remove dev dependencies like poetry
+COPY radiotomate/ ./radiotomate
+RUN poetry install --only main \
+    && poetry sync --only main --no-root

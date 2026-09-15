@@ -1,0 +1,272 @@
+{% extends 'layout.jinja' %}
+{% set title = "Modifier le cart" if cart else "Nouveau cart" %}
+{% block title %}{{ title }}{% endblock title %}
+
+{% from 'macros.jinja' import cron_formula, jour_label %}
+
+{% block content %}
+<section class="content">
+<div class="container">
+<h1 aria-hidden="true" id="cart_title">
+    {{ title }}
+</h1>
+
+<form aria-labelledby="cart_title"
+    x-data="{
+        advanced: {{ is_advanced }},
+        schedule: '{{ cart.schedule_mode.name if cart else ScheduleMode.TIMED.name }}',
+        mode: '{{ cart.mode.name if cart else CartMode.PLAYLIST.name }}'
+        }">
+
+    <div class="field is-horizontal">
+        <div class="field-label">
+            <label for="title" class="label">Titre</label>
+        </div>
+        <div class="field-body">
+            <div class="field">
+                <div class="control">
+                    <input type="text" class="input" name="title" id="title" value="{{ cart.title if cart else '' }}" required>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="field is-horizontal">
+        <div class="field-label">
+            <label for="notes" class="label">Notes</label>
+        </div>
+        <div class="field-body">
+            <div class="field">
+                <div class="control">
+                    <textarea class="textarea" name="notes" id="notes">{{ cart.notes if cart else '' }}</textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="field is-horizontal">
+        <div class="field-label">
+            <label for="mode" class="label">Mode</label>
+        </div>
+        <div class="field-body">
+            <div class="field">
+                <div class="control select">
+                    <select name="mode" id="mode" x-model="mode"
+                        {{ 'disabled' if cart and cart.mode == CartMode.RELAY else '' }}>
+                        {% for mode in CartMode %}
+                            {% if not cart or mode != CartMode.RELAY or cart.mode == CartMode.RELAY %}
+                                <option value="{{ mode.name }}" {{ 'selected' if cart and cart.mode == mode else '' }}>
+                                    {{ mode.label }}
+                                </option>
+                            {% endif %}
+                        {% endfor %}
+                    </select>
+                </div>
+                <p class="help">
+                    <strong>Playlist</strong> : ordre de la liste.
+                    <strong>Looping Playlist</strong> : reprend au début.
+                    <strong>Random</strong> : un son au hasard.
+                    <strong>Relay</strong> : flux Icecast externe (durée max. obligatoire).
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <template x-if="mode == '{{ CartMode.RELAY.name }}'">
+        <div class="field is-horizontal">
+            <div class="field-label">
+                <label for="url" class="label">URL</label>
+            </div>
+            <div class="field-body">
+                <div class="field">
+                    <div class="control">
+                        <input type="text" class="input" id="url" name="url" value="{{ cart.url if cart else '' }}" required>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <div class="field is-horizontal">
+        <div class="field-label">
+            <label for="max_duration" class="label">Durée max.</label>
+        </div>
+        <div class="field-body">
+            <div class="field has-addons">
+                <div class="control">
+                    <input type="number" class="input" name="max_duration_minutes" placeholder="minutes" value="{{
+                        (cart.max_duration // 60) if cart and cart.max_duration else ''
+                    }}">
+                </div>
+                <div class="control" aria-hidden="true">
+                    <a class="button is-static">
+                        :
+                    </a>
+                </div>
+                <div class="control">
+                    <input type="number" class="input" name="max_duration_seconds" placeholder="seconds" value="{{
+                        (cart.max_duration % 60) if cart and cart.max_duration else ''
+                    }}">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="field is-horizontal">
+        <div class="field-label">
+            <label for="schedule" class="label">Programmation</label>
+        </div>
+        <div class="field-body">
+            <div class="field">
+                <div class="control select">
+                    <select name="schedule" id="schedule" x-model="schedule">
+                        {% for mode in ScheduleMode %}
+                            <option value="{{ mode.name }}" {{ 'selected' if cart and cart.schedule_mode == mode else '' }}>
+                                {{ mode.label }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <template x-if="schedule == '{{ ScheduleMode.TIMED.name }}'"><div>
+        <template x-if="advanced">
+            <div>
+                <div class="field is-horizontal">
+                    <div class="field-label">
+                        <label class="label">Quand</label>
+                    </div>
+                    <div class="field-body">
+                        {{ cron_formula(cart) }}
+                    </div>
+                </div>
+                <div class="field is-horizontal">
+                    <div class="field-label">
+                        <label class="label">File</label>
+                    </div>
+                    <div class="field-body radios">
+                        <label class="radio">
+                            <input type="radio" name="queue" value="carts" {{ 'checked' if not cart or cart.url !='autodj' else '' }} />
+                            Carts
+                        </label>
+                        <label class="radio">
+                            <input type="radio" name="queue" value="autodj" {{ 'checked' if cart and cart.url=='autodj' else '' }} />
+                            Auto-DJ
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <template x-if="!advanced">
+            <div class="field is-horizontal">
+                <div class="field-label">
+                    <label class="label">Quand</label>
+                </div>
+                <div class="field-body">
+                    <div class="field has-addons">
+                        <p class="control">
+                            <span class="select">
+                                <select name="day_of_week" aria-label="jour de la semaine" title="jour de la semaine">
+                                    {% for day in day_names %}
+                                        <option value="{{ day.value }}"{{ ' selected' if (cart and day.matches(cart.schedule_day_of_week)) else '' }}>
+                                            {{ jour_label(day) }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </span>
+                        </p>
+                        <p class="control">
+                            <span class="select">
+                                <select name="hour" aria-label="heure" title="heure">
+                                    {% for hour in range(60) %}
+                                    {% set h = hour | string %}
+                                    <option value="{{ h }}"{{ ' selected' if (cart and cart.schedule_hour == h) else '' }}>{{ h }}</option>
+                                    {% endfor %}
+                                </select>
+                            </span>
+                        </p>
+                        <p class="control" aria-hidden="true">
+                            <a class="button is-static">
+                                :
+                            </a>
+                        </p>
+                        <p class="control">
+                            <span class="select">
+                                <select name="minute" aria-label="minute" title="minute">
+                                    {% for minute in range(60) %}
+                                    {% set m = minute | string %}
+                                    <option value="{{ m }}"{{ ' selected' if (cart and cart.schedule_minute == m) else '' }}>{{ m }}</option>
+                                    {% endfor %}
+                                </select>
+                            </span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <div class="field is-horizontal">
+            <div class="field-label">&nbsp;</div>
+            <div class="field-body">
+                <div class="field">
+                    <label class="checkbox">
+                        <input type="checkbox" x-model="advanced"/>
+                        Avancé
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div></template>
+
+    <input type="hidden" name="coming_from" value="{{ coming_from }}">
+
+    {% if cart and cart.mode != CartMode.RELAY %}
+    <div class="field is-horizontal">
+        <div class="field-label"></div>
+        <div class="field-body">
+            <a href="{{ url_for('carts.sounds_list', cart_id=cart.id) }}">Gérer les sons</a>
+        </div>
+    </div>
+    {% endif %}
+
+    {% set submitValue = "Enregistrer" if cart else "Ajouter" %}
+    <div class="field is-horizontal mt-6">
+        <div class="field-label"></div>
+        <div class="field-body">
+            <div class="field is-grouped">
+                <div class="control">
+                    <button
+                        type="submit" class="button is-primary"
+                        {% if cart %}
+                            hx-put="{{ url_for('carts.edit', cart_id=cart.id) }}"
+                        {% else %}
+                            hx-post="{{ url_for('carts.add') }}"
+                        {% endif %}
+                        aria-label="{{ submitValue }}"
+                    >
+                        {{ submitValue }}
+                    </button>
+                </div>
+                <div class="control">
+                    <a
+                        class="button is-danger"
+                        {% if coming_from == 'sounds' %}
+                            href="{{ url_for('carts.sounds_list', cart_id=cart.id) }}"
+                        {% else %}
+                            href="{{ url_for('carts.index') }}"
+                        {% endif %}
+                        aria-label="Annuler"
+                        >
+                        Annuler
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+</section>
+</div>
+{% endblock content %}

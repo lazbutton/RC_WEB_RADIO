@@ -1,0 +1,25 @@
+{
+  "name": "radiotomate",
+  "version": "0.0.1",
+  "description": "CSS generator for radiotomate",
+  "main": "index.js",
+  "directories": {},
+  "scripts": {
+    "package": "sass --load-path=node_modules --style=compressed --no-source-map radiotomate.scss ../radiotomate/static/radiotomate.css",
+    "watch": "npm run build -- --watch",
+    "build": "sass --load-path=node_modules radiotomate.scss ../radiotomate/static/radiotomate.css"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://git.sr.ht/~martink/radiotomate"
+  },
+  "keywords": [
+    "radio"
+  ],
+  "author": "Martin Kirchgessner",
+  "license": "AGPL-3.0-or-later",
+  "dependencies": {
+    "bulma": "^1.0.2",
+    "sass": "^1.80.7"
+  }
+}

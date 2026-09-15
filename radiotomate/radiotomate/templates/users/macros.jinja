@@ -1,0 +1,24 @@
+{% macro permission_input(user, name, tooltip, visible_label=None) %}
+<div class="field is-horizontal">
+    <div class="field-label">
+        <label for="{{ name }}" class="label">
+            {{ visible_label or name }}
+        </label>
+    </div>
+    <div class="field-body">
+        <div class="field">
+            <div class="control">
+                <input name="{{ name }}"
+                    id="{{ name }}"
+                    type="checkbox"
+                    value="true"
+                    {% if user and user.permissions[name[4:]] %}
+                        checked="checked"
+                    {% endif %}
+                    >
+            </div>
+            <p class="help">{{ tooltip }}</p>
+        </div>
+    </div>
+</div>
+{% endmacro %}

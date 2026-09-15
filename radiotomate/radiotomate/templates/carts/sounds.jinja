@@ -1,0 +1,169 @@
+{% extends 'layout.jinja' %}
+{% block title %}Sons — {{cart.title}}{% endblock title %}
+
+{% from 'carts/macros.jinja' import sound_lines, cart_summary %}
+{% set can_carts = current_user.user.can_carts() %}
+
+{% macro add_button(cart_id) %}
+<div class="file is-primary">
+    <label class="file-label" for="addsound">
+        <input id="addsound"
+            type="file"
+            class="file-input"
+            name="sounds"
+            multiple
+            hx-post="{{ url_for('carts.add_sounds', cart_id=cart_id, from_list=True) }}"
+            hx-encoding="multipart/form-data"
+            hx-trigger="change"
+            hx-disabled-elt="this"
+            hx-indicator="next .htmx-indicator"
+            hx-target="#soundsrows"
+            hx-swap="beforeend show:window:bottom"
+        >
+        <span class="file-cta">
+            {{ icon('📂') }}
+            <span class="file-label">Ajouter des sons</span>
+            <span class="htmx-indicator" aria-label="chargement"></span>
+        </span>
+    </label>
+</div>
+{% endmacro %}
+
+{% block content %}
+<section class="content">
+<div class="container">
+<h1>
+    Sons — {{cart.title}}
+</h1>
+
+<div class="level">
+    <div class="level-left">
+        <div class="level-item tag is-info is-large" role="note">
+            {{ cart_summary(cart, swap=False) }}
+        </div>
+        {% if can_carts %}
+            <div class="level-item">
+                {{ add_button(cart.id) }}
+            </div>
+            <a
+                class="button is-primary"
+                href="{{ url_for('carts.edit_form', cart_id=cart.id, coming_from='sounds')}}"
+                >
+                Modifier le cart
+            </a>
+        {% endif %}
+    </div>
+</div>
+
+{% if cart.sounds | selectattr('gain', 'none') | list %}
+<p class="help ntr-help">
+    Les sons marqués <strong>Analyse</strong> n’ont pas encore de ReplayGain :
+    ils ne peuvent pas passer à l’antenne tant que la mesure n’est pas terminée.
+</p>
+{% endif %}
+
+<table class="table is-fullwidth is-striped is-hoverable" aria-label="Liste des sons">
+    <thead>
+        <tr>
+            {% if cart.mode != CartMode.RANDOM %}
+                <th scope="col" class="has-text-centered">Rang</th>
+            {% endif %}
+            <th scope="col">Écoute</th>
+            <th scope="col">Durée</th>
+            <th scope="col">Titre</th>
+            <th scope="col">Dernière diffusion</th>
+            <th scope="col">Importé par</th>
+            <th scope="col" class="has-text-centered">Actif</th>
+            {% if can_carts %}
+            <th scope="col" class="has-text-centered">Actions</th>
+            {% endif %}
+        </tr>
+    </thead>
+    <tbody id="soundsrows"
+        hx-post="{{ url_for('carts.sort_sounds', cart_id=cart.id) }}"
+        hx-trigger="end"
+        hx-include=".rankinputs"
+        hx-sync="this:queue" {# queue ordering events when a request is in flight #}
+        hx-swap="none" {# only swaps out of band <span id='rank-X'>  #}
+        >
+        {{ sound_lines(cart.sounds, next_id, cart.mode, can_carts) }}
+    </tbody>
+</table>
+
+{% if can_carts %}
+<div class="level">
+    <div class="level-left">
+        <div class="level-item">
+            {{ add_button(cart.id) }}
+        </div>
+    </div>
+</div>
+{%endif %}
+
+</div>
+</section>
+{% endblock content %}
+
+{% block scripts %}
+{% if can_carts %}
+<script defer src="{{ url_for("static", filename="Sortable.min.js") }}"></script>
+<script>
+    sortableTableId = "soundsrows";
+
+    document.addEventListener("DOMContentLoaded", function() {
+        var sortable = document.getElementById("soundsrows");
+        var sortableInstance = new Sortable(sortable, {
+            animation: {{ transitions_delay_ms }},
+            ghostClass: 'is-light',
+            handle: ".draghandle",
+
+            // Disable sorting on the `end` event
+            onEnd: function (evt) {
+                this.option("disabled", true);
+            }
+        });
+
+        // Re-enable sorting on the `htmx:afterSwap` event
+        document.getElementById("soundsrows").addEventListener("htmx:afterSwap", function() {
+            sortableInstance.option("disabled", false);
+        });
+    });
+
+    function createSpinner() {
+        var spinner = document.createElement('span');
+        spinner.ariaLabel = "Chargement";
+        spinner.className = 'htmx-indicator';
+        return spinner;
+    }
+
+    function moveSound(event, going_up) {
+        var button = event.target;
+        var line = button.closest('tr');
+        if (going_up) {
+            var other = line.previousElementSibling;
+        } else {
+            var other = line.nextElementSibling;
+        }
+        if (other) {
+            var spinner = createSpinner();
+            button.before(spinner);
+            button.remove();
+
+            // move the line before sending the request, so Sortable will send values in the correct order
+            if (going_up) {
+                other.before(line);
+            } else {
+                other.after(line);
+            }
+            var table = document.getElementById(sortableTableId);
+            htmx.trigger(table, "end");
+            document.getElementById("soundsrows").addEventListener("htmx:beforeSwap", function() {
+                spinner.before(button);
+                spinner.remove();
+            }, { once: true });
+        }
+    }
+
+</script>
+{% endif %}
+{% endblock scripts %}

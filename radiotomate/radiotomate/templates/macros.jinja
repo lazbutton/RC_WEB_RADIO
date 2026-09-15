@@ -1,0 +1,92 @@
+{% macro menu_item(target, title, is_active) %}
+<a href="{{ url_for(target) }}"
+    class="ntr-nav-item {{ "is-active" if is_active }}"
+    {% if is_active %}
+    aria-current="page"
+    {% endif %}
+    @click="sidebarOpen = false"
+    >
+    {{ title }}
+</a>
+{% endmacro %}
+
+{% macro password_field(label, stacked=false, autocomplete='current-password', required=false) %}
+<div class="field{% if not stacked %} is-horizontal{% endif %}">
+    <div class="field-label">
+        <label for="password" class="label">{{ label }}</label>
+    </div>
+    <div class="field-body">
+        <div class="field">
+            <div class="control has-icons-right" x-data="{ show: false }">
+                <input :type="show ? 'text' : 'password'" name="password" id="password" class="input" autocomplete="{{ autocomplete }}"{% if required %} required{% endif %}>
+                <span class="icon is-clickable is-right" x-text="show ? '👓' : '👁'" @click="show = !show"></span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+{% macro audio_player(src) %}
+    {% if not current_user.user.can_not_audio() %}
+        <audio controls
+            src="{{ src }}"
+            preload="none"
+            >
+        </audio>
+        <a class="button" aria-label="Télécharger" title="Télécharger" href="{{ src }}">
+            📥
+        </a>
+    {% else %}
+        🔇
+    {% endif%}
+{% endmacro %}
+
+{% macro jour_label(day) %}
+{%- if day.value == 0 -%}Lundi
+{%- elif day.value == 1 -%}Mardi
+{%- elif day.value == 2 -%}Mercredi
+{%- elif day.value == 3 -%}Jeudi
+{%- elif day.value == 4 -%}Vendredi
+{%- elif day.value == 5 -%}Samedi
+{%- elif day.value == 6 -%}Dimanche
+{%- else -%}{{ day.display }}
+{%- endif -%}
+{% endmacro %}
+
+{% macro cron_formula(cart) %}
+    <div class="field">
+        <div class="field has-addons">
+            <div class="control">
+                <input type="text" class="input" name="year" placeholder="year" title="année" value="{{ cart.schedule_year if cart else '' }}">
+            </div>
+            <div class="control">
+                <input type="text" class="input" name="month" placeholder="month" title="mois" value="{{ cart.schedule_month if cart else '' }}">
+            </div>
+            <div class="control">
+                <input type="text" class="input" name="day" placeholder="day" title="jour" value="{{ cart.schedule_day if cart else '' }}">
+            </div>
+            <div class="control">
+                <input type="text" class="input" name="week" placeholder="week" title="semaine" value="{{ cart.schedule_week if cart else '' }}">
+            </div>
+            <div class="control">
+                <input type="text" class="input" name="day_of_week" placeholder="weekday" title="jour de la semaine" value="{{ cart.schedule_day_of_week if cart else '' }}">
+            </div>
+            <div class="control">
+                <input type="text" class="input" name="hour" placeholder="hour" title="heure" value="{{ cart.schedule_hour if cart else '' }}">
+            </div>
+            <div class="control">
+                <input type="text" class="input" name="minute" placeholder="minute" title="minute" value="{{ cart.schedule_minute if cart else '' }}">
+            </div>
+            <div class="control">
+                <input type="text" class="input" name="second" placeholder="second" title="seconde" value="{{ cart.schedule_second if cart else '' }}">
+            </div>
+        </div>
+        <p class="help">
+            Expressions cron
+            <a href="https://apscheduler.readthedocs.io/en/stable/modules/triggers/cron.html#introduction" target="_blank">
+                APScheduler
+            </a>.
+            Un champ vide vaut *, les secondes valent 0.
+        </p>
+    </div>
+{% endmacro %}

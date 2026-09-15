@@ -1,0 +1,117 @@
+{% extends 'layout.jinja' %}
+{% block title %}Antenne{% endblock title %}
+
+{% block content %}
+<section>
+<div id="livecontent"
+    hx-ext="sse"
+    sse-connect="{{ url_for("live.get") }}"
+    sse-swap="message"
+    >
+
+    <div class="ntr-desk ntr-desk--waiting">
+        <div class="ntr-desk-toolbar">
+            <span
+                id="skipbutton"
+                class="ntr-skip-wrap"
+                hx-preserve
+                >
+                {% if current_user.user.can_live() %}
+                    <button
+                        class="button is-danger ntr-skip"
+                        hx-delete="{{ url_for('live.skip') }}"
+                        hx-on::confirm="confirmWithMessage(`Passer le morceau en cours ?`)"
+                        hx-swap="none"
+                        title="Passer le morceau (Espace ou S)"
+                        aria-keyshortcuts="Space s"
+                        >
+                        Passer le morceau
+                    </button>
+                    <p class="ntr-skip-hint">Espace ou S</p>
+                {% endif %}
+            </span>
+        </div>
+        <p class="ntr-waiting">En attente des informations d’antenne…</p>
+    </div>
+</div>
+</section>
+
+<script>
+function setOnAirStandby() {
+    var el = document.getElementById("ntr-onair");
+    if (!el) {
+        return;
+    }
+    el.className = "ntr-onair is-standby";
+    el.setAttribute("aria-label", "STANDBY");
+    var label = el.querySelector(".ntr-onair-label");
+    if (label) {
+        label.textContent = "STANDBY";
+    }
+}
+
+function skipButton() {
+    var wrap = document.getElementById("skipbutton");
+    return wrap ? wrap.querySelector("button") : null;
+}
+
+function isTypingTarget(el) {
+    if (!el) {
+        return false;
+    }
+    var tag = (el.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") {
+        return true;
+    }
+    return !!el.isContentEditable;
+}
+
+document.body.addEventListener("keydown", function (evt) {
+    if (evt.defaultPrevented || evt.ctrlKey || evt.metaKey || evt.altKey) {
+        return;
+    }
+    if (isTypingTarget(evt.target)) {
+        return;
+    }
+    if (document.querySelector(".swal2-container")) {
+        return;
+    }
+    var skip = skipButton();
+    if (!skip) {
+        return;
+    }
+    var space = evt.key === " " || evt.key === "Spacebar";
+    var letterS = evt.key === "s" || evt.key === "S";
+    if (!space && !letterS) {
+        return;
+    }
+    if (space && (evt.target === skip || skip.contains(evt.target))) {
+        return;
+    }
+    evt.preventDefault();
+    skip.focus();
+    skip.click();
+});
+
+document.body.addEventListener('htmx:sseError', function () {
+    var root = document.getElementById("livecontent");
+    var skip = document.getElementById("skipbutton");
+    root.innerHTML = "";
+    var desk = document.createElement("div");
+    desk.className = "ntr-desk";
+    var toolbar = document.createElement("div");
+    toolbar.className = "ntr-desk-toolbar";
+    if (skip) {
+        toolbar.appendChild(skip);
+    }
+    var msg = document.createElement("p");
+    msg.className = "ntr-sse-error";
+    msg.textContent = "Impossible de joindre le playout. Vérifiez que le moteur est démarré.";
+    desk.appendChild(toolbar);
+    desk.appendChild(msg);
+    root.appendChild(desk);
+    setOnAirStandby();
+})
+</script>
+
+{% endblock content %}

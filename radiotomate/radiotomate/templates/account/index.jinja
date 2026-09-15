@@ -1,0 +1,37 @@
+{% extends 'layout.jinja' %}
+{% block title %}Mon compte{% endblock title %}
+
+{% from 'macros.jinja' import password_field %}
+{% block content %}
+<section class="content">
+<div class="container">
+<h1 aria-hidden="true" id="page_title">
+    Mon compte
+</h1>
+
+<p class="ntr-help">{{ current_user.user.username }}</p>
+
+<form aria-labelledby="page_title">
+    {{ password_field("Nouveau mot de passe", autocomplete="new-password", required=true) }}
+
+    <div class="field is-horizontal">
+        <div class="field-label"></div>
+        <div class="field-body">
+            <div class="field is-grouped">
+                <div class="control">
+                    <button
+                        type="submit"
+                        class="button is-primary"
+                        hx-put="{{ url_for('account.update') }}"
+                        aria-label="Enregistrer"
+                    >
+                        Enregistrer
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+</section>
+</div>
+{% endblock content %}

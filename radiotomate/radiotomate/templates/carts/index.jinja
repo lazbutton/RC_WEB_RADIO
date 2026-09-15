@@ -1,0 +1,137 @@
+{% extends 'layout.jinja' %}
+{% block title %}Carts{% endblock title %}
+
+{% from 'carts/macros.jinja' import cart_summary %}
+{% set can_carts = current_user.user.can_carts() %}
+{% block content %}
+<section class="content">
+<div class="container">
+<h1>
+    Carts
+</h1>
+
+<p>
+    {% if can_carts %}
+    <a
+        class="button is-primary"
+        href="{{ url_for('carts.add_form')}}"
+        aria-label="Nouveau cart"
+        >
+        Nouveau cart
+    </a>
+    {% endif %}
+</p>
+
+<table class="table is-fullwidth is-striped is-hoverable" aria-label="Liste des carts">
+    <thead>
+        <tr>
+            <th scope="col">Titre</th>
+            <th scope="col">Notes</th>
+            <th scope="col">Sons</th>
+            <th scope="col">Durée moyenne</th>
+            <th scope="col">Programmation</th>
+            <th scope="col">Actions</th>
+        </tr>
+    </thead>
+    <tbody id="cartsrows">
+        {% for cart in carts %}
+        <tr class="fade-in fade-out" title="{{ cart.title }}">
+            <td>
+                {% if can_carts %}
+                <a href="{{ url_for('carts.edit_form', cart_id=cart.id) }}">
+                {% endif %}
+                    {{ cart.title | safe }}
+                {% if can_carts %}
+                </a>
+                {% endif %}
+            </td>
+            <td>{{ cart.notes | safe }}</td>
+            <td>
+                {% if cart.mode == CartMode.RELAY%}
+                    <a href="{{cart.url}}" target="_blank">
+                        {{ hostname_span(cart.url) }}
+                    </a>
+                {% else %}
+                    {% if cart.sounds_count %}
+                        <a href="{{ url_for('carts.sounds_list', cart_id=cart.id) }}">
+                            {% if cart.mode == CartMode.PLAYLIST %}
+                                <span aria-role="tooltip" title="Playlist">
+                                    {{ icon('⬇️') }}
+                                </span>
+                            {% elif cart.mode == CartMode.PLAYLIST_LOOP %}
+                                <span aria-role="tooltip" title="Playlist en boucle">
+                                    {{ icon('🔃') }}
+                                </span>
+                            {% elif cart.mode == CartMode.RANDOM %}
+                                <span aria-role="tooltip" title="Aléatoire">
+                                    {{ icon('🔀') }}
+                                </span>
+                            {% endif %}
+
+                            {{ cart_summary(cart, swap=False) }}
+                        </a>
+                    {% elif can_carts %}
+                        <label for="addsound">Ajouter :</label>
+                        <input id="addsound"
+                            type="file"
+                            name="sounds"
+                            multiple
+                            hx-post="{{ url_for('carts.add_sounds', cart_id=cart.id) }}"
+                            hx-encoding="multipart/form-data"
+                            hx-trigger="change"
+                        >
+                    {% endif %}
+                {% endif %}
+            </td>
+            <td>
+                {% if cart.mode != CartMode.RELAY%}
+                    {{ duration_span(cart.average_duration) }}
+                {% endif %}
+                {% if cart.max_duration %}
+                    (limite : {{ cart.max_duration // 60 }}:{{ '%02d' % (cart.max_duration % 60) }})
+                {% endif %}
+            </td>
+            <td class="{{ 'is-danger' if not cart.schedule_correct else
+                'is-warning' if cart.schedule_mode == ScheduleMode.JINGLES else
+                'is-primary' if cart.schedule_mode == ScheduleMode.TIMED else '' }}">
+                {{ cart.schedule_summary() }}
+            </td>
+            <td>
+                {% if can_carts and current_user.user.can_live() %}
+                    <button
+                        class="button is-small"
+                        title="Diffuser maintenant"
+                        aria-label="Diffuser maintenant"
+                        hx-post="{{ url_for('carts.push_now', cart_id=cart.id) }}"
+                        hx-on::confirm="confirmWithMessage(`Diffuser « {{ cart.title }} » maintenant ?`)"
+                        hx-swap="none"
+                    >
+                        Diffuser
+                    </button>
+                {% endif %}
+                {% if cart.mode != CartMode.RELAY%}
+                    <a title="Gérer les sons" href="{{ url_for('carts.sounds_list', cart_id=cart.id) }}">
+                        {{ icon('🗃️') }}
+                    </a>
+                {% endif %}
+                {% if can_carts %}
+                    <a title="Modifier" href="{{ url_for('carts.edit_form', cart_id=cart.id) }}">
+                        {{ icon('✏️') }}
+                    </a>
+                    <button title="Supprimer"
+                        hx-delete="{{ url_for('carts.delete', cart_id=cart.id) }}"
+                        hx-on::confirm="confirmWithMessage(`Supprimer le cart {{cart.title}} ?`)"
+                        hx-swap="outerHTML"
+                        hx-target="closest tr"
+                    >
+                        {{ icon('❌') }}
+                    </button>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+</section>
+{% endblock content %}

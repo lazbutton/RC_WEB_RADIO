@@ -1,0 +1,57 @@
+---
+
+# this is a template: cf. `app_configration` fixture
+
+data:
+  root: /should/not/be/used
+
+db:
+  url: "db_url_goes_here"
+
+interface:
+  cookie_salt: 78cb8d33f7b52a7cdbeebfcc883bc33915dab7a711ece31e0618003da7313600
+
+playout_process_config:
+  token: 24e32490bca776cfeddb44945268818eb9e98e0bde69497dc792428ac15ba992
+
+metadata_log:
+  extra_fields:
+    - genre
+    - year
+
+############# Logging configuration ##########
+logging:
+  version: 1
+  disable_existing_loggers: false
+
+  formatters:
+    generic:
+      format: "%(asctime)s %(levelname)-5.5s [%(name)s:%(lineno)s] %(message)s"
+  
+  handlers:
+    default:
+      formatter: generic
+      class : logging.StreamHandler
+    interface:
+      formatter: generic
+      class : logging.StreamHandler
+    scheduler:
+      formatter: generic
+      class : logging.StreamHandler
+  
+  root:
+    level: INFO
+    handlers: []
+  
+  loggers:
+    radiotomate:
+      level: DEBUG
+      handlers: []
+      propagate: false
+      qualname: radiotomate
+
+    # set to INFO to log SQL queries
+    sqlalchemy:
+      level: WARNING
+      qualname: sqlalchemy
+  

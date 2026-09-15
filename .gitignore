@@ -14,5 +14,11 @@ __pycache__/
 *.db
 *.db-*
 
-# Fork Radiotomate : dépôt git à part (branche ntr/theme), pas un gitlink.
-/radiotomate/
+# Radiotomate (vendored in this monorepo)
+radiotomate/radio_data/
+radiotomate/node_modules/
+radiotomate/*.log
+radiotomate/.ruff_cache/
+radiotomate/.pytest_cache/
+radiotomate/.venv/
+radiotomate/data/
