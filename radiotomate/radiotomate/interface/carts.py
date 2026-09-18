@@ -1,7 +1,9 @@
 import contextlib
 import json
 import logging
+import os
 import shutil
+from pathlib import Path
 from urllib.parse import urlparse
 
 import mutagen
@@ -37,6 +39,44 @@ from radiotomate.templates import render_macro as general_render_macro
 _log = logging.getLogger(__name__)
 
 blueprint = Blueprint("carts", __name__, template_folder="templates")
+
+
+def media_root() -> Path:
+    return Path(os.environ.get("MEDIA_ROOT", "/media")).resolve()
+
+
+def path_in_media_bank(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+        root = media_root()
+        return resolved == root or root in resolved.parents
+    except (OSError, RuntimeError):
+        return False
+
+
+def unlink_cart_file(path: Path | None) -> None:
+    """Delete a file copied into /data/carts. Never touch the shared media bank."""
+    if not path:
+        return
+    if path_in_media_bank(path):
+        return
+    path.unlink(missing_ok=True)
+
+
+def resolve_bank_path(raw: str) -> Path:
+    root = media_root()
+    candidate = Path(raw)
+    path = candidate if candidate.is_absolute() else (root / candidate)
+    resolved = path.resolve()
+    if root not in resolved.parents and resolved != root:
+        raise BadRequest("path is outside the media bank")
+    rel = resolved.relative_to(root).as_posix()
+    top = rel.split("/", 1)[0]
+    if top in {"00-inbox", "90-trash"}:
+        raise BadRequest("inbox/trash cannot be attached to a cart")
+    if not resolved.is_file():
+        raise BadRequest(f"missing file: {rel}")
+    return resolved
 
 
 async def render_macro(macro, **kwargs) -> str:
@@ -408,7 +448,7 @@ async def _ingest_json_uploads(cart_id: int, uploads: list) -> list[Sound]:
         length = getattr(info, "length", None)
         if metadata is None or length is None:
             with contextlib.suppress(OSError):
-                path.unlink(missing_ok=True)
+                unlink_cart_file(path)
             continue
         sound = Sound(
             cart_id=cart_id,
@@ -433,11 +473,22 @@ async def add_sounds_json(cart_id: int):
     cart = await Cart.from_id(g.dbsession, cart_id)
     if not cart:
         raise NotFound(f"Cart {cart_id} not found")
-    form = await stream_form(cart.path)
-    uploads = form.getall("sounds") or form.getall("file")
-    if not uploads:
-        raise BadRequest("No sound file uploaded")
-    added_sounds = await _ingest_json_uploads(cart_id, uploads)
+    payload = await request.get_json(silent=True)
+    if isinstance(payload, dict) and payload.get("paths"):
+        raw_paths = payload.get("paths")
+        if not isinstance(raw_paths, list) or not raw_paths:
+            raise BadRequest("paths list required")
+        uploads = []
+        for raw in raw_paths:
+            path = resolve_bank_path(str(raw))
+            uploads.append({"uploaded_to": path, "filename": path.name})
+        added_sounds = await _ingest_json_uploads(cart_id, uploads)
+    else:
+        form = await stream_form(cart.path)
+        uploads = form.getall("sounds") or form.getall("file")
+        if not uploads:
+            raise BadRequest("No sound file uploaded")
+        added_sounds = await _ingest_json_uploads(cart_id, uploads)
     if not added_sounds:
         raise BadRequest("No audio file uploaded")
     await g.dbsession.commit()
@@ -475,7 +526,7 @@ async def delete_sounds_json(cart_id: int):
         if not sound or sound.cart_id != cart_id:
             raise NotFound(f"Sound {sound_id} not found")
         if sound.path:
-            sound.path.unlink(missing_ok=True)
+            unlink_cart_file(sound.path)
         await g.dbsession.delete(sound)
     await g.dbsession.flush()
     await Sound.update_ranks(g.dbsession, cart_id)
@@ -494,7 +545,7 @@ async def delete_sound_json(cart_id: int, sound_id: int):
     if not sound or sound.cart_id != cart_id:
         raise NotFound(f"Sound {sound_id} not found")
     if sound.path:
-        sound.path.unlink(missing_ok=True)
+        unlink_cart_file(sound.path)
     await g.dbsession.delete(sound)
     await g.dbsession.flush()
     await Sound.update_ranks(g.dbsession, cart_id)
@@ -867,7 +918,7 @@ async def delete_sound(cart_id: int, sound_id: int):
     if not sound.cart.id == cart_id:
         raise NotFound(f"Sound {sound_id} is not in cart {cart_id}")
 
-    sound.path.unlink()
+    unlink_cart_file(sound.path)
     await g.dbsession.delete(sound)
     await g.dbsession.flush()
 

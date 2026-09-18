@@ -25,17 +25,17 @@ radiotomate --config-path "$RTCONFIG" users roles   # liste des identifiants
 
 Mots de passe : phrases longues (`minimum_password_length: 20`). Pas d’e-mail de reset : un admin réinitialise.
 
-## Taxonomie MusicDropbox
+## Taxonomie médiathèque
 
-Dossiers créés par `ops/scripts/setup-dropbox.sh`. `drop2beets` déplace vers `Music/` après tags Artist + Title.
+Voir **[mediatheque.md](mediatheque.md)** : arbre unique `data/media/ntr` (inbox → rotation / archives / habillage). Plus de `MusicDropbox/` comme source de vérité.
 
-| Dossier dropbox | Tag Beets (on_item) | Usage auto-DJ |
+| Dossier final | Tag Beets | Usage |
 |---|---|---|
-| `ntf1/` | `grouping=ntf1` `genre=Archive` | Archives édition 1 |
-| `ntf2/` | `grouping=ntf2` | Archives édition 2 |
-| `ntf3/` | `grouping=ntf3` | Archives édition 3 |
-| `rotation/` | `grouping=rotation` | Auto-DJ 24/24 |
-| `habits/` | — | Habillage (plutôt **carts jingles**, pas Beets) |
+| `10-rotation/` | `grouping=rotation` | Auto-DJ 24/24 |
+| `20-archives/ntf1/` | `grouping=ntf1` `genre=Archive` | Archives édition 1 |
+| `20-archives/ntf2/` | `grouping=ntf2` | Archives édition 2 |
+| `20-archives/ntf3/` | `grouping=ntf3` | Archives édition 3 |
+| `30-habillage/` | — | Carts + Pads, **pas** Beets |
 
 Filtres créneaux (syntaxe Beets) :
 
@@ -52,4 +52,4 @@ Filtres créneaux (syntaxe Beets) :
 
 Jingles : au moins un fichier **avant** d’attendre de la musique. Recette install officielle.
 
-Convention fichiers : `Artiste - Titre.mp3` + ID3. ReplayGain calculé en fond (Beets) ; ne pas coller un fichier dans un cart qui part 3 secondes plus tard.
+Convention fichiers : `Artiste - Titre.mp3` + ID3. ReplayGain calculé en fond (Beets) ; ne pas coller un fichier dans un cart qui part 3 secondes plus tard. Premier jingle : un wav dans `30-habillage/jingles/` puis attache le chemin au cart (pas une copie dans `/data/carts`).

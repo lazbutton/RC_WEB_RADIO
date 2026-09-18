@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,17 +28,35 @@ class PathLike(TypeDecorator):
     This reduces the DB size and let the user move the `DATA_ROOT` folder, they
     should onyl update the configuration. However applications must copy
     `base_path` from their configuration when starting.
+
+    Paths under ``MEDIA_ROOT`` (banque Nasgul, hors ``DATA_ROOT``) are stored
+    with a ``media:`` prefix so carts can reference shared files in place.
     """
 
     impl = String
     base_path: Path = None
+    MEDIA_PREFIX = "media:"
+
+    @staticmethod
+    def media_root() -> Path:
+        return Path(os.environ.get("MEDIA_ROOT", "/media")).resolve()
 
     def process_bind_param(self, value: Path | None, dialect: Dialect) -> str:
         """Convert an `Path` value to a string for the database."""
         if value:
             if not self.base_path:
                 raise RuntimeError("Application factory must set PathLike.base_path")
-            return str(value.relative_to(self.base_path))
+            resolved = Path(value).resolve()
+            try:
+                return str(resolved.relative_to(self.base_path.resolve()))
+            except ValueError:
+                try:
+                    rel = resolved.relative_to(self.media_root()).as_posix()
+                except ValueError as exc:
+                    raise ValueError(
+                        f"{resolved} is outside DATA_ROOT and MEDIA_ROOT",
+                    ) from exc
+                return f"{self.MEDIA_PREFIX}{rel}"
         return value
 
     def process_result_value(
@@ -49,6 +68,8 @@ class PathLike(TypeDecorator):
         if value is not None:
             if not self.base_path:
                 raise RuntimeError("Application factory must set PathLike.base_path")
+            if value.startswith(self.MEDIA_PREFIX):
+                return self.media_root() / value[len(self.MEDIA_PREFIX) :]
             return self.base_path / value
         return value
 

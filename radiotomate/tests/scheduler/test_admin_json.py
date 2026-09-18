@@ -1,6 +1,7 @@
 from io import BytesIO
 from pathlib import Path
 
+import pytest
 from sqlalchemy.orm import Session as ormSession
 from werkzeug.datastructures import FileStorage
 
@@ -476,6 +477,56 @@ async def test_cart_sounds_bulk_json(
     )
     assert deleted.status_code == 200, await deleted.get_data(as_text=True)
     assert (await deleted.get_json())["cart"]["sounds"] == []
+
+
+async def test_cart_attach_bank_path_json(  # noqa: PLR0913
+    raw_app,
+    app_configration: dict,
+    beets_integration: BeetsIntegration,
+    dbsession: ormSession,
+    users_password: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    media = tmp_path / "media"
+    jingles = media / "30-habillage" / "jingles"
+    jingles.mkdir(parents=True)
+    mp3 = ASSETS / "ohradiotomateoh.mp3"
+    bank_file = jingles / "jingle_ntr_ouverture.mp3"
+    bank_file.write_bytes(mp3.read_bytes())
+    inbox = media / "00-inbox" / "rotation"
+    inbox.mkdir(parents=True)
+    (inbox / "secret.mp3").write_bytes(mp3.read_bytes())
+    monkeypatch.setenv("MEDIA_ROOT", str(media))
+
+    client = await _admin_client(
+        app_configration,
+        beets_integration,
+        dbsession,
+        users_password,
+        "cart-bank",
+    )
+    created = await client.post(
+        "/carts.json",
+        json={"title": "Bank Cart", "mode": "playlist", "schedule_mode": "timed"},
+    )
+    assert created.status_code == 201, await created.get_data(as_text=True)
+    cart_id = (await created.get_json())["cart"]["id"]
+    attached = await client.post(
+        f"/carts/{cart_id}/sounds.json",
+        json={"paths": ["30-habillage/jingles/jingle_ntr_ouverture.mp3"]},
+    )
+    assert attached.status_code == 201, await attached.get_data(as_text=True)
+    sounds = (await attached.get_json())["cart"]["sounds"]
+    assert len(sounds) == 1
+    blocked = await client.post(
+        f"/carts/{cart_id}/sounds.json",
+        json={"paths": ["00-inbox/rotation/secret.mp3"]},
+    )
+    assert blocked.status_code == 400
+    gone = await client.delete(f"/carts/{cart_id}/sounds/{sounds[0]['id']}.json")
+    assert gone.status_code == 200
+    assert bank_file.is_file()
 
 
 async def test_spa_serves_console_dist(

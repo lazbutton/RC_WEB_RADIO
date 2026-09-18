@@ -100,7 +100,11 @@ class Sound(Base):
         q = select(Sound).filter(Sound.cart_id == cart_id)
         sounds = list(await session.scalars(q))
         for sound in sounds:
-            sound.path = new / sound.path.relative_to(old)
+            try:
+                sound.path = new / sound.path.relative_to(old)
+            except ValueError:
+                # Banque /media : le fichier n'est pas dans le dossier du cart.
+                continue
 
     @classmethod
     async def ids_without_gain(cls, session: Session) -> list[int]:
