@@ -32,6 +32,8 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/ntr-radiotomate:main
             ghcr.io/${{ github.repository_owner }}/ntr-radiotomate:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/button-radiotomate:main
+            ghcr.io/${{ github.repository_owner }}/button-radiotomate:${{ github.sha }}
           cache-from: type=gha,scope=radiotomate
           cache-to: type=gha,mode=max,scope=radiotomate
       - name: Build and push playout
@@ -44,5 +46,7 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/ntr-playout:main
             ghcr.io/${{ github.repository_owner }}/ntr-playout:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/button-playout:main
+            ghcr.io/${{ github.repository_owner }}/button-playout:${{ github.sha }}
           cache-from: type=gha,scope=playout
           cache-to: type=gha,mode=max,scope=playout
