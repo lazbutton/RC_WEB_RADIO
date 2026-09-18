@@ -29,9 +29,9 @@ jobs:
           file: ./radiotomate/Containerfile
           platforms: linux/amd64
           push: true
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/ntr-radiotomate:main
-            ghcr.io/${{ github.repository_owner }}/ntr-radiotomate:${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/button-radiotomate:main
             ghcr.io/${{ github.repository_owner }}/button-radiotomate:${{ github.sha }}
           cache-from: type=gha,scope=radiotomate
@@ -43,9 +43,9 @@ jobs:
           file: ./radiotomate/playout/Containerfile
           platforms: linux/amd64
           push: true
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/ntr-playout:main
-            ghcr.io/${{ github.repository_owner }}/ntr-playout:${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/button-playout:main
             ghcr.io/${{ github.repository_owner }}/button-playout:${{ github.sha }}
           cache-from: type=gha,scope=playout
