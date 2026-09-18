@@ -310,6 +310,40 @@ async def test_push_now(
     assert result.status_code == 404
 
 
+async def test_push_named_sound(
+    client: QuartClient,
+    fake_cart: Cart,
+    fake_sound: Sound,
+    fake_sound2: Sound,
+    auth: dict,
+):
+    with patch(
+        "httpx.AsyncClient.post",
+        return_value=httpx.Response(200, json={"OK": 1}),
+    ) as mock_client:
+        result = await client.post(
+            f"/schedule/{fake_cart.id}/sounds/{fake_sound2.id}/now",
+            headers=auth,
+        )
+        assert result.status_code == 200
+        mock_client.assert_called_once_with(
+            "/queue/carts",
+            json={
+                "path": str(fake_sound2.path),
+                "artist": fake_cart.title,
+                "title": fake_sound2.title,
+                "radiotomate_sound_id": fake_sound2.id,
+                "rg_track_gain": str(fake_sound2.gain),
+            },
+        )
+
+    missing = await client.post(
+        f"/schedule/{fake_cart.id}/sounds/99999/now",
+        headers=auth,
+    )
+    assert missing.status_code == 404
+
+
 async def test_schedule_no_sound_enabled(
     client: QuartClient,
     dbsession: ormSession,

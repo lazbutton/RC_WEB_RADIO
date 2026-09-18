@@ -92,18 +92,44 @@
 
     <div class="field is-horizontal">
         <div class="field-label">
+            <label for="clock_id" class="label">Horloge</label>
+        </div>
+        <div class="field-body">
+            <div class="field">
+                <div class="control select">
+                    <select id="clock_id" name="clock_id" required>
+                        {% for clock in clocks %}
+                            <option value="{{ clock.id }}"
+                                {% if slot and slot.clock_id == clock.id %}
+                                    selected
+                                {% elif not slot and default_clock and clock.id == default_clock.id %}
+                                    selected
+                                {% endif %}
+                                >
+                                {{ clock.name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <p class="help">
+                    Le créneau charge cette horloge (motif + ancres). C’est le
+                    <em>quoi</em> de l’auto-DJ.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="field is-horizontal">
+        <div class="field-label">
             <label class="label">
                 Filtres
             </label>
         </div>
         <div class="field-body">
             <p>
-                Les morceaux de ce créneau sont filtrés par les
-                <a href="https://beets.readthedocs.io/en/stable/reference/query.html" target="_blank" rel="noopener">
-                requêtes Beets</a>
-                éventuelles.
-                Si plusieurs filtres sont fournis, l’un d’eux est tiré au hasard selon son <strong>poids</strong>.
-                Un filtre trop restrictif fait retomber l’auto-DJ sur toute la bibliothèque.
+                Les filtres Beets ci-dessous ne pilotent plus le moteur : l’horloge
+                du créneau décide du programme. Ils restent une aide de saisie
+                (requêtes Beets, poids) pour plus tard.
             </p>
             <p class="help">
                 Exemples NTR : <code>grouping:rotation</code>,

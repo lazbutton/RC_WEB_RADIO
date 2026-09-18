@@ -16,6 +16,11 @@ db:
 interface:
     # should be set randomly when installing. Changing it would log out everyone.
     cookie_salt: {cookie_salt}
+    # true behind TLS; false for local HTTP (develop / tests).
+    cookie_secure: {cookie_secure}
+    csrf_enabled: true
+    # Build Vite (console/dist). Vide = chercher ../console/dist à côté du dépôt.
+    # console_dist: /var/lib/radiotomate/console/dist
 
 playout_process_config:
     input_name: "{http_input_name}"
@@ -46,6 +51,10 @@ metadata_log:
     extra_fields:
         - genre
         - year
+    relay_retry:
+        max_attempts: 3
+        timeout_seconds: 2
+        backoff_seconds: [0.2, 0.5]
 
     # if you want to POST metadata to some other websites, remove leading # below:
     #relay_to:
@@ -58,6 +67,14 @@ metadata_log:
     #    # and/or additional POST headers
     #    add_header:
     #      Authorization: "Basic YWxhZGRpbjpvcGVuc2VzYW1l"
+
+health:
+    heartbeat_max_age_seconds: 5
+
+queue_cleaner:
+    enabled: true
+    max_age_seconds: 600
+    interval_seconds: 60
 
 
 ############# Logging configuration ##########
@@ -183,6 +200,7 @@ class Installer:
                     log_level=log_level,
                     playout_log_config=playout_log_config,
                     cookie_salt=secrets.token_hex(),
+                    cookie_secure="false" if dev else "true",
                     playout_token=secrets.token_hex(),
                     start_sound_path=str(start_sound),
                 ),

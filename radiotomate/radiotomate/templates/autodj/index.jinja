@@ -12,8 +12,9 @@
         Auto-DJ
     </h1>
 
-{% if can_autodj %}
 <p>
+    <a class="button" href="{{ url_for('autodj.conducteur') }}">Conducteur</a>
+{% if can_autodj %}
     <a
         class="button is-primary"
         href="{{ url_for('autodj.add_form')}}"
@@ -21,8 +22,8 @@
         >
         Nouveau créneau
     </a>
-</p>
 {% endif %}
+</p>
 
 <div class="columns" id="autodjschedule">
     {% for day in day_names %}
@@ -42,9 +43,8 @@
 </div>
 
 <p class="ntr-help">
-    Chaque créneau tire un morceau dans Beets. Le <strong>poids</strong> d’un filtre
-    décide de sa chance d’être choisi. Si le filtre est trop restrictif, l’auto-DJ
-    retombe sur <strong>toute la bibliothèque</strong>.
+    Chaque créneau charge <strong>une horloge</strong> (motif + ancres).
+    Les filtres Beets du calendrier ne pilotent plus le moteur.
 </p>
 <p class="ntr-help">
     Taxonomie NTR (aide de saisie, pas une règle du moteur) :

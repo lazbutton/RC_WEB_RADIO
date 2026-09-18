@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from pathlib import Path  # noqa: TC003
 from random import choice
+from typing import ClassVar
 
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import Boolean, Integer, Select, String, case, delete, func, select
@@ -27,6 +28,8 @@ _log = logging.getLogger(__name__)
 # Sound carts having this value as Cart.url should be pushed to the auto-dj queue
 # instead of the usual carts queue
 URL_TO_AUTODJ_QUEUE = "autodj"
+JINGLES_QUEUE = "jingles"
+CARTS_QUEUE = "carts"
 
 
 class Cart(Base):
@@ -39,6 +42,7 @@ class Cart(Base):
 
     __tablename__ = "carts"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     title: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     path: Mapped[Path]  # should be null only while creating the cart's folder
     url: Mapped[str]
@@ -85,6 +89,8 @@ class Cart(Base):
     sounds_count: Mapped[int] = query_expression()
     inactive_sounds_count: Mapped[int] = query_expression()
 
+    __mapper_args__: ClassVar[dict] = {"version_id_col": version}
+
     @classmethod
     def add_query_expressions(cls, query: Select) -> Select:
         """
@@ -130,6 +136,7 @@ class Cart(Base):
         session: Session,
         schedule_mode: ScheduleMode | None = None,
         load_sounds: bool = False,
+        load_uploaders: bool = False,
     ) -> list[Cart]:
         """
         Returns all carts, with sounds_count pre-computed.
@@ -142,7 +149,10 @@ class Cart(Base):
         if schedule_mode:
             q = q.filter(Cart.schedule_mode == schedule_mode)
         if load_sounds:
-            q = q.options(selectinload(Cart.sounds))
+            if load_uploaders:
+                q = q.options(selectinload(Cart.sounds).selectinload(Sound.uploader))
+            else:
+                q = q.options(selectinload(Cart.sounds))
         else:
             q = cls.add_query_expressions(q)
         carts = (await session.scalars(q)).all()
@@ -179,7 +189,7 @@ class Cart(Base):
             q = cls.add_query_expressions(q)
         q = q.filter(Cart.id == cart_id)
         cart = await session.scalar(q)
-        if load_sounds:
+        if cart and load_sounds:
             cart.postfill_query_expressions()
         return cart
 
@@ -281,6 +291,14 @@ class Cart(Base):
         self.average_duration = sum([s.duration for s in self.sounds]) // len(
             self.sounds,
         )
+
+    def playout_queue(self) -> str:
+        """Liquidsoap queue used by « Diffuser maintenant » / pads."""
+        if self.url == URL_TO_AUTODJ_QUEUE:
+            return URL_TO_AUTODJ_QUEUE
+        if self.schedule_mode is ScheduleMode.JINGLES:
+            return JINGLES_QUEUE
+        return CARTS_QUEUE
 
     def next_sound(self, for_display=False) -> Sound | None:
         """

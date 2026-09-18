@@ -5,6 +5,7 @@ from typing import Optional
 from quart import Quart
 
 from radiotomate.quart import ShutdownError, or_shutdown
+from radiotomate.scheduler.metrics import runtime_metrics
 
 _log = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class Watchdog:
                         version,
                     )
                 Watchdog.liquidsoap_version = version
+            runtime_metrics.playout_connected = version != "disconnected"
             try:
                 await or_shutdown(asyncio.sleep(10))
             except (ShutdownError, asyncio.CancelledError):

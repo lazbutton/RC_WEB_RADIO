@@ -290,6 +290,21 @@ $PULSEAUDIO_MOUNT
     ports:
       - containerPort: 6800
         hostPort: $STREAM_INPUT_PORT
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 6833
+      initialDelaySeconds: 20
+      periodSeconds: 15
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 6833
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 3
   - name: interface
     image: $WEBAPPS_IMAGE
     command:
@@ -312,6 +327,21 @@ $PULSEAUDIO_MOUNT
     ports:
       - containerPort: 6811
         hostPort: $INTERFACE_PORT
+    livenessProbe:
+      httpGet:
+        path: /health/live
+        port: 6811
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health/ready
+        port: 6811
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
   - name: scheduler
     image: $WEBAPPS_IMAGE
     command:
@@ -331,6 +361,21 @@ $PULSEAUDIO_MOUNT
         name: beetsmusic
       - mountPath: /etc/localtime:z
         name: tz-config
+    livenessProbe:
+      httpGet:
+        path: /health/live
+        port: 6822
+      initialDelaySeconds: 15
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health/ready
+        port: 6822
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      timeoutSeconds: 3
   - name: dropbox
     image: $WEBAPPS_IMAGE
     command:

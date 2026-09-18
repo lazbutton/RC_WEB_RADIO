@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from quart import Blueprint, g, redirect, render_template, request, url_for
+from quart import Blueprint, g, jsonify, redirect, render_template, request, url_for
 from quart_auth import current_user, login_user, logout_user
 from werkzeug.exceptions import BadRequest, Unauthorized
 
@@ -49,6 +49,29 @@ async def log_in():
             "HX-Redirect": url_for("home.index"),
         },
     )
+
+
+@blueprint.post("/login.json")
+async def log_in_json():
+    data = await request.get_json(silent=True) or {}
+    username = str(data.get("username") or "").strip()
+    password = str(data.get("password") or "")
+    if not username or not password:
+        return jsonify({"error": "unauthenticated"}), 401
+
+    user = await User.check(g.dbsession, username, password)
+    if not user:
+        await asyncio.sleep(1)
+        return jsonify({"error": "unauthenticated"}), 401
+    session = Session(
+        user_id=user.id,
+        user_agent=request.headers.get("User-Agent"),
+        latest_address=request.remote_addr,
+    )
+    g.dbsession.add(session)
+    await g.dbsession.commit()
+    login_user(RadiotomateAuth(session.id))
+    return jsonify({"ok": True})
 
 
 @blueprint.route("/logout")

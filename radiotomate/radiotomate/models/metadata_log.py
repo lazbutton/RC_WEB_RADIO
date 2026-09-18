@@ -26,6 +26,17 @@ class MetadataLog(Base):
     source: Mapped[str] = mapped_column(String)
     source_url: Mapped[str] = mapped_column(String)
     cart_id: Mapped[int] = mapped_column(Integer, ForeignKey("carts.id"))
+    rundown_item_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("rundown_items.id"),
+        nullable=True,
+        index=True,
+    )
+    playout_command_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("playout_commands.id"),
+        nullable=True,
+    )
     artist: Mapped[str] = mapped_column(String)
     title: Mapped[str] = mapped_column(String)
     album: Mapped[str] = mapped_column(String)
@@ -36,6 +47,8 @@ class MetadataLog(Base):
     )  # https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#sqlalchemy.dialects.sqlite.JSON
 
     cart: Mapped[Cart] = relationship()  # noqa: F821
+    rundown_item: Mapped[RundownItem | None] = relationship()  # noqa: F821
+    playout_command: Mapped[PlayoutCommand | None] = relationship()  # noqa: F821
 
     @classmethod
     async def from_playout(cls, session: ormSession, md: dict) -> MetadataLog:  # noqa: PLR0912
@@ -54,6 +67,12 @@ class MetadataLog(Base):
                     sound.last_played = parsed.on_air
                     parsed.cart = sound.cart
             del md["radiotomate_sound_id"]
+        if "radiotomate_item_id" in md:
+            parsed.rundown_item_id = str(md.pop("radiotomate_item_id") or "") or None
+        if "radiotomate_command_id" in md:
+            parsed.playout_command_id = (
+                str(md.pop("radiotomate_command_id") or "") or None
+            )
         if "source" in md:
             if md["source"]:
                 parsed.source = md["source"]

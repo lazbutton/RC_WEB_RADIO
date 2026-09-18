@@ -3,17 +3,20 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from random import randint
+from typing import ClassVar
 
-from sqlalchemy import Integer, String, select
+from sqlalchemy import ForeignKey, Integer, String, select
 from sqlalchemy.dialects.sqlite import DATETIME, JSON
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import (
     Mapped,
     mapped_column,
+    relationship,
 )
 from sqlalchemy.orm import Session as ormSession
 
 from radiotomate.db import Base
+from radiotomate.models.clock import Clock  # noqa: TC001
 
 _log = logging.getLogger(__name__)
 
@@ -46,6 +49,14 @@ class AutoDJSlot(Base):
     )
     color: Mapped[str] = mapped_column(String, nullable=False, default="")
     title: Mapped[str] = mapped_column(String, nullable=False, default="")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    clock_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("clocks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    clock: Mapped[Clock | None] = relationship()
     created: Mapped[datetime] = mapped_column(
         DATETIME, default=datetime.now, nullable=False
     )
@@ -55,6 +66,8 @@ class AutoDJSlot(Base):
         default=datetime.now,
         onupdate=datetime.now,
     )
+
+    __mapper_args__: ClassVar[dict] = {"version_id_col": version}
 
     @classmethod
     async def all(cls, session: ormSession) -> list[AutoDJSlot]:
@@ -94,6 +107,44 @@ class AutoDJSlot(Base):
             q = q.filter(AutoDJSlot.day_of_week == day_of_week)
         q = q.order_by(AutoDJSlot.minute.desc())
         return await session.scalar(q)
+
+    @classmethod
+    async def next_after(
+        cls,
+        session: ormSession,
+        slot: AutoDJSlot,
+    ) -> AutoDJSlot | None:
+        """
+        Next daypart after ``slot`` on the weekly wheel (same day later, else next day).
+        """
+        later = await session.scalar(
+            select(AutoDJSlot)
+            .filter(
+                AutoDJSlot.day_of_week == slot.day_of_week,
+                AutoDJSlot.minute > slot.minute,
+            )
+            .order_by(AutoDJSlot.minute.asc())
+        )
+        if later:
+            return later
+        next_dow = (slot.day_of_week + 1) % 7
+        return await session.scalar(
+            select(AutoDJSlot)
+            .filter(AutoDJSlot.day_of_week == next_dow)
+            .order_by(AutoDJSlot.minute.asc())
+        )
+
+    def daypart_end_minute(self, nxt: AutoDJSlot | None) -> int:
+        """
+        Exclusive end of this daypart as minute-of-day (1440 if it wraps past midnight).
+        """
+        if (
+            nxt is not None
+            and nxt.day_of_week == self.day_of_week
+            and nxt.minute > self.minute
+        ):
+            return nxt.minute
+        return 1440
 
     @classmethod
     async def current_filter(cls, session: ormSession) -> str:

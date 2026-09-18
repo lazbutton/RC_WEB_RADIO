@@ -8,7 +8,14 @@ Python objects. They can implement methods, but should not ``commit`` (at most,
 
 from radiotomate.models.autodj_slot import AutoDJSlot
 from radiotomate.models.cart import Cart
+from radiotomate.models.clock import Clock, ClockPosition
+from radiotomate.models.execution import (
+    PlayoutCommand,
+    ProgrammingVersion,
+    RundownItem,
+)
 from radiotomate.models.metadata_log import MetadataLog
+from radiotomate.models.music_category import MusicCategory
 from radiotomate.models.session import Session
 from radiotomate.models.setting import Setting
 from radiotomate.models.sound import Sound
@@ -17,8 +24,14 @@ from radiotomate.models.user import LoggedOutUser, User
 __all__ = [
     "AutoDJSlot",
     "Cart",
+    "Clock",
+    "ClockPosition",
     "LoggedOutUser",
     "MetadataLog",
+    "MusicCategory",
+    "PlayoutCommand",
+    "ProgrammingVersion",
+    "RundownItem",
     "Session",
     "Setting",
     "Sound",

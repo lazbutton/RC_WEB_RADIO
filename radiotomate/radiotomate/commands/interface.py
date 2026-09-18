@@ -24,9 +24,11 @@ def interface(config_dict, demo, reload):
     from radiotomate.scheduler_api import Scheduler
 
     if demo:
+        from pathlib import Path
+
         from radiotomate.beets.demo import BeetsMockIntegration
 
-        beets = BeetsMockIntegration()
+        beets = BeetsMockIntegration(seed_root=Path(config_dict["data"]["root"]))
     else:
         from radiotomate.beets import BeetsIntegration
 

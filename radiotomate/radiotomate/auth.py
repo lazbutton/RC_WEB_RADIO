@@ -7,7 +7,7 @@ from datetime import datetime
 from functools import wraps
 from typing import Callable, ParamSpec, TypeVar
 
-from quart import current_app, g, redirect, request, url_for
+from quart import current_app, g, jsonify, redirect, request, url_for
 from quart_auth import (
     AuthUser,
     Unauthorized,
@@ -23,6 +23,8 @@ P = ParamSpec("P")
 
 
 async def redirect_to_login(*_):
+    if request.path.endswith(".json"):
+        return jsonify({"error": "unauthenticated"}), 401
     return redirect(url_for("login.log_in"))
 
 

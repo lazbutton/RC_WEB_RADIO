@@ -10,6 +10,10 @@ db:
 
 interface:
   cookie_salt: 78cb8d33f7b52a7cdbeebfcc883bc33915dab7a711ece31e0618003da7313600
+  # Désactive le SPA dist auto-détecté pendant les tests
+  console_dist: /__no_console_dist__
+  csrf_enabled: false
+  cookie_secure: false
 
 playout_process_config:
   token: 24e32490bca776cfeddb44945268818eb9e98e0bde69497dc792428ac15ba992
@@ -18,6 +22,18 @@ metadata_log:
   extra_fields:
     - genre
     - year
+  relay_retry:
+    max_attempts: 3
+    timeout_seconds: 2
+    backoff_seconds: [0, 0]
+
+health:
+  heartbeat_max_age_seconds: 5
+
+queue_cleaner:
+  enabled: false
+  max_age_seconds: 600
+  interval_seconds: 60
 
 ############# Logging configuration ##########
 logging:

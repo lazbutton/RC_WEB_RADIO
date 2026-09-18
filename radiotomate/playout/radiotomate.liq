@@ -111,14 +111,16 @@ def http_log(req, res, next)
   started_at = time()
   next(req, res)
   spent = time() - started_at
-  if req.method != 'GET' or req.path != '/version' then
+  if req.method != 'GET' or (req.path != '/version' and req.path != '/health') then
     log(label="http", "#{req.method} #{req.path} #{res.status_code.current()} #{spent}")
   end
 end
 harbor.http.middleware.register(http_log)
 
 def check_token(req, res, next)
-  if req.headers["x-auth-token"] != conf.playout_process_config.token then
+  if req.method == "GET" and req.path == "/health" then
+    next(req, res)
+  elsif req.headers["x-auth-token"] != conf.playout_process_config.token then
     res.status_code(401)
   else
     next(req, res)
@@ -148,13 +150,12 @@ autodj_queue.push(request.create(conf.playout_process_config.start_sound))
 
 jingles_queue = request.queue(id="jingles_queue")
 
-jingles = delay(780., id="jingles",
-  blank.eat(start_blank=true,
-    max_blank=BLANK_MAX_DURATION,
-    threshold=BLANK_THRESHOLD,
-    stereo( # If there's a mono file
-      jingles_queue
-    )
+jingles = blank.eat(id="jingles",
+  start_blank=true,
+  max_blank=BLANK_MAX_DURATION,
+  threshold=BLANK_THRESHOLD,
+  stereo( # If there's a mono file
+    jingles_queue
   )
 )
 
@@ -447,6 +448,12 @@ end
 
 harbor.http.register(port=API_PORT, method="GET", "/version", version_GET)
 
+def health_GET(_, res) =
+  res.json({status="live"})
+end
+
+harbor.http.register(port=API_PORT, method="GET", "/health", health_GET)
+
 #### Skip / max duration / stop relay
 
 def live_DELETE(req, res) =
@@ -546,6 +553,74 @@ def queue_POST(req, res) =
 end
 
 harbor.http.register(port=API_PORT, method="POST", "/queue/:queue", queue_POST)
+
+
+def _queue_clean_result(q, max_age)
+  now = time()
+  removed = ref(0)
+  kept = ref(0)
+  playing = ref(-1)
+  current_maybe = q.current()
+  if null.defined(current_maybe) then
+    playing := request.id(null.get(current_maybe))
+  end
+  list.iter(fun (r) -> begin
+    rid = request.id(r)
+    if rid == playing() then
+      kept := kept() + 1
+    else
+      md = request.metadata(r)
+      pushed_s = md["pushed"]
+      if string.length(pushed_s) == 0 then
+        kept := kept() + 1
+      else
+        try
+          age = now - float_of_string(pushed_s)
+          if age > max_age then
+            q.remove_request_id(rid)
+            removed := removed() + 1
+          else
+            kept := kept() + 1
+          end
+        catch err do
+          kept := kept() + 1
+          ignore(err)
+        end
+      end
+    end
+  end, q.queue())
+  {removed=removed(), kept=kept()}
+end
+
+
+def queue_clean_POST(req, res) =
+  max_age = ref(600.)
+  try
+    let json.parse (posted:{max_age_seconds: float?}) = req.body()
+    if null.defined(posted.max_age_seconds) then
+      max_age := null.get(posted.max_age_seconds)
+    end
+  catch err do
+    ignore(err)
+  end
+  age = max_age()
+  clamped =
+    if age < 30. then
+      30.
+    elsif age > 7200. then
+      7200.
+    else
+      age
+    end
+  res.status_code(200)
+  res.json({
+    autodj=_queue_clean_result(autodj_queue, clamped),
+    jingles=_queue_clean_result(jingles_queue, clamped),
+    carts=_queue_clean_result(carts_queue, clamped)
+  })
+end
+
+harbor.http.register(port=API_PORT, method="POST", "/queue/clean", queue_clean_POST)
 
 
 def relay_POST(req, res) =

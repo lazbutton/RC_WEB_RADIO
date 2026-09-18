@@ -38,7 +38,9 @@ def app_configration() -> Generator[dict, None, None]:
 
     with TemporaryDirectory() as tmpdir:
         db_uri = f"sqlite+aiosqlite:///{tmpdir}/db.db"
-        content = template.replace(b"db_url_goes_here", db_uri.encode())
+        content = template.replace(b"db_url_goes_here", db_uri.encode()).replace(
+            b"/should/not/be/used", tmpdir.encode()
+        )
         config_path = Path(tmpdir) / "radiotomate.yaml"
         config_path.write_bytes(content)
         config = load_config(config_path, verbose=True, main_handler="scheduler")
@@ -85,6 +87,69 @@ def auth() -> dict:
 async def dbsession(raw_app: CustomQuart) -> AsyncGenerator[ormSession]:
     async with raw_app.extensions["sqlalchemy"].session() as session:
         yield session
+
+
+@pytest.fixture(autouse=True)
+def reset_clock_sequencer():
+    from radiotomate.scheduler.clock import reset_state
+    from radiotomate.scheduler.metrics import runtime_metrics
+    from radiotomate.scheduler.watchdog import Watchdog
+
+    reset_state()
+    runtime_metrics.reset()
+    Watchdog.liquidsoap_version = "disconnected"
+    yield
+    reset_state()
+    runtime_metrics.reset()
+    Watchdog.liquidsoap_version = "disconnected"
+
+
+@pytest.fixture
+async def jingles_ntr_cart(raw_app: CustomQuart, dbsession: ormSession) -> Cart:
+    cartpath = raw_app.config["DATA_ROOT"] / "jingles-ntr"
+    cart = Cart(
+        title="Jingles NTR",
+        path=cartpath,
+        mode=CartMode.RANDOM,
+        schedule_mode=ScheduleMode.JINGLES,
+    )
+    dbsession.add(cart)
+    await dbsession.flush()
+    sound = Sound(
+        cart_id=cart.id,
+        path=cartpath / "id-ntr.mp3",
+        duration=8,
+        title="ID NTR",
+        gain=-1.0,
+        peak=-0.5,
+    )
+    dbsession.add(sound)
+    await dbsession.commit()
+    return cart
+
+
+@pytest.fixture
+async def pubs_cart(raw_app: CustomQuart, dbsession: ormSession) -> Cart:
+    cartpath = raw_app.config["DATA_ROOT"] / "pubs"
+    cart = Cart(
+        title="Pubs",
+        path=cartpath,
+        mode=CartMode.RANDOM,
+        schedule_mode=ScheduleMode.TIMED,
+    )
+    dbsession.add(cart)
+    await dbsession.flush()
+    sound = Sound(
+        cart_id=cart.id,
+        path=cartpath / "spot.mp3",
+        duration=20,
+        title="Spot test",
+        gain=-1.0,
+        peak=-0.5,
+    )
+    dbsession.add(sound)
+    await dbsession.commit()
+    return cart
 
 
 @pytest.fixture

@@ -24,8 +24,10 @@ from radiotomate.quart import CustomQuart, ShutdownError
 from radiotomate.scheduler import (
     analyzer,
     harbor,
+    health,
     live,
     metadata_log,
+    queue_cleaner,
     schedule,
     version,
 )
@@ -96,10 +98,30 @@ def app_factory(config: dict, beets: BeetsIntegration) -> CustomQuart:
                 },
             ),
             "RELAY_METADATA_TO": config.get("metadata_log", {}).get("relay_to", []),
+            "RELAY_METADATA_RETRY": config.get("metadata_log", {}).get(
+                "relay_retry",
+                {},
+            ),
+            "HEALTH_HEARTBEAT_MAX_AGE": config.get("health", {}).get(
+                "heartbeat_max_age_seconds",
+                5,
+            ),
+            "QUEUE_CLEAN_ENABLED": bool(
+                config.get("queue_cleaner", {}).get("enabled", True)
+            ),
+            "QUEUE_CLEAN_MAX_AGE": config.get("queue_cleaner", {}).get(
+                "max_age_seconds",
+                600,
+            ),
+            "QUEUE_CLEAN_INTERVAL": config.get("queue_cleaner", {}).get(
+                "interval_seconds",
+                60,
+            ),
         },
     )
     app.register_error_handler(Exception, errors_as_text)
 
+    app.register_blueprint(health.blueprint)
     app.register_blueprint(analyzer.blueprint)
     app.register_blueprint(harbor.blueprint)
     app.register_blueprint(live.blueprint)
@@ -118,6 +140,8 @@ def app_factory(config: dict, beets: BeetsIntegration) -> CustomQuart:
             dbsettings = await radiotomate.models.Setting.load_all(session)
             app.config.from_mapping(dbsettings)
         app.add_background_task(beets.background_analyzer, db)
+        if app.config.get("QUEUE_CLEAN_ENABLED", True):
+            app.add_background_task(queue_cleaner.loop, app)
 
     auth_manager = QuartAuth()
     auth_manager.user_class = RadiotomateAuth

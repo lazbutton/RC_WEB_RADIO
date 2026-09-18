@@ -12,7 +12,7 @@ async def test_autodj_calendar(admin_page: Page, luser_page: Page):  # noqa: PLR
     await expect(page.day("Lundi")).to_be_visible()
     await expect(page.get_by_text("grouping:rotation")).to_be_visible()
 
-    slot = page.slot("00:00").first
+    slot = page.slot("24/24 Rotation habillée").first
     await slot.get_by_role("link").click()
     await expect(page.form_input("Annuler")).to_be_visible()
     await expect(page.form_input("Supprimer")).not_to_be_visible()
@@ -66,7 +66,7 @@ async def test_autodj_calendar(admin_page: Page, luser_page: Page):  # noqa: PLR
     await slot.get_by_role("link").click()
     await page.click_label("Supprimer")
     await page.dialog_click("Oui")
-    await expect(page.slot("00:00").first).to_be_visible()  # back to calendar page
+    await expect(page.slot("24/24 Rotation habillée").first).to_be_visible()
     await expect(slot).not_to_be_visible()
 
     await page.click_label("Nouveau créneau")

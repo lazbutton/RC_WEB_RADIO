@@ -8,9 +8,8 @@ This module processes information sent every second by the playout process:
 
 import json
 import logging
-import time
-from asyncio import Lock, Queue, sleep
-from random import shuffle
+from asyncio import Lock, Queue
+from time import perf_counter
 
 from quart import Blueprint, current_app, make_response, request
 from werkzeug.exceptions import BadRequest
@@ -18,15 +17,14 @@ from werkzeug.exceptions import BadRequest
 from radiotomate.auth import token_required
 from radiotomate.beets import BeetsIntegration
 from radiotomate.db import QuartAlchemy
-from radiotomate.enums import ScheduleMode
-from radiotomate.models import AutoDJSlot, Cart
 from radiotomate.quart import ShutdownError, or_shutdown
+from radiotomate.scheduler.clock import tick as clock_tick
+from radiotomate.scheduler.metrics import runtime_metrics
 
 blueprint = Blueprint("live", __name__)
 watching_clients = set()
 
-_flag_jingles_update_running = Lock()
-_flag_autodj_update_running = Lock()
+_flag_sequencer_running = Lock()
 
 _log = logging.getLogger(__name__)
 
@@ -73,122 +71,25 @@ async def _notify_clients(data):
         await queue.put(data)
 
 
-async def _push_jingle():
-    async with _flag_jingles_update_running:
-        started = time.perf_counter()
-        db = QuartAlchemy.get()
-        async with db.session() as session:
-            carts = await Cart.all(
-                session, schedule_mode=ScheduleMode.JINGLES, load_sounds=True
-            )
-        shuffle(carts)
-        while carts:
-            cart = carts.pop()
-            sound = cart.next_sound()
-            if sound:
-                response = await current_app.config["PLAYOUT_CLIENT"].post(
-                    "/queue/jingles",
-                    json={
-                        "path": str(sound.path),
-                        "artist": "",
-                        "title": "",
-                        "radiotomate_sound_id": sound.id,
-                        "rg_track_gain": str(sound.gain),
-                    },
-                )
-                if response.status_code == 200:
-                    result = response.json()
-                    _log.info(
-                        "Pushed jingle %d sound %s:%s as RID %s, in %.03fs",
-                        cart.id,
-                        sound.id,
-                        sound.path,
-                        result,
-                        time.perf_counter() - started,
-                    )
-                else:
-                    try:
-                        result = response.json()
-                    except json.JSONDecodeError:
-                        result = response.text
-                    _log.error(
-                        "Error while pushing jingle %d sound %s:%s: %s, in %.03fs",
-                        cart.id,
-                        sound.id,
-                        sound.path,
-                        result,
-                        time.perf_counter() - started,
-                    )
-                return
-        _log.warning("We should queue a jingle, but none is available.")
-        await sleep(10)
-
-
-async def _push_autodj():
-    async with _flag_autodj_update_running:
-        started = time.perf_counter()
-        beets = BeetsIntegration.get()
-        db = QuartAlchemy.get()
-        async with db.session() as session:
-            trackfilter = await AutoDJSlot.current_filter(session)
-        next_item = await beets.random_pick(trackfilter)
-        if not next_item:
-            next_item = await beets.random_pick("")
-            if next_item:
-                msg = (
-                    "Auto-DJ filter %r could not select any track!"
-                    "falling back to full random"
-                )
-                _log.warning(msg, trackfilter)
-        if next_item:
-            next_path = next_item.path.decode()
-            response = await current_app.config["PLAYOUT_CLIENT"].post(
-                "/queue/autodj",
-                json={
-                    "path": next_path,
-                    "beets_id": next_item.id,
-                    "rg_track_gain": next_item.rg_track_gain,
-                },
-            )
-            if response.status_code == 200:
-                result = response.json()
-                _log.info(
-                    "Pushed track %s to autodj as RID %s, in %.03fs",
-                    next_path,
-                    result,
-                    time.perf_counter() - started,
-                )
-            else:
-                try:
-                    result = response.json()
-                except json.JSONDecodeError:
-                    result = response.text
-                _log.error(
-                    "Error while pushing track %s to autodj: %s, in %.03fs",
-                    next_path,
-                    result,
-                    time.perf_counter() - started,
-                )
-        else:
-            _log.warning("We should queue to autodj, but no track is selectable")
-            await sleep(10)
+async def _run_sequencer(live_data: dict):
+    started = perf_counter()
+    try:
+        async with _flag_sequencer_running:
+            beets = BeetsIntegration.get()
+            db = QuartAlchemy.get()
+            client = current_app.config["PLAYOUT_CLIENT"]
+            async with db.session() as session:
+                await clock_tick(session, live_data, client, beets)
+    finally:
+        runtime_metrics.tick_duration_seconds = perf_counter() - started
 
 
 async def _check_queues(data):
     live_data = json.loads(data)
-    if (
-        "next_jingle" in live_data
-        and live_data["next_jingle"].get("rid") == -1
-        and not _flag_jingles_update_running.locked()
-    ):
-        current_app.add_background_task(_push_jingle)
-
-    if (
-        "next_autodj" in live_data
-        and live_data["next_autodj"].get("rid") == -1
-        and not _flag_autodj_update_running.locked()
-    ):
-        current_app.add_background_task(_push_autodj)
+    if _flag_sequencer_running.locked():
+        runtime_metrics.tick_skipped_total += 1
+        return
+    current_app.add_background_task(_run_sequencer, live_data)
 
 
 @blueprint.post("/live")
@@ -197,6 +98,7 @@ async def post():
     if not request.is_json:
         raise BadRequest("JSON object expected")
     data = await request.get_data()
+    runtime_metrics.heartbeat()
     current_app.add_background_task(_notify_clients, data)
     current_app.add_background_task(_check_queues, data)
     return "", 200
@@ -215,6 +117,8 @@ logging.getLogger("hypercorn.access").addFilter(LiveFilter())
 @blueprint.delete("/live")
 @token_required
 async def skip():
-    client = current_app.config["PLAYOUT_CLIENT"]
-    await client.delete("/live")
+    from radiotomate.scheduler.playout import gateway_for
+
+    gateway = gateway_for(current_app.config["PLAYOUT_CLIENT"])
+    await gateway.skip()
     return "", 200

@@ -29,7 +29,8 @@ poetry run radiotomate -c radio_data/radiotomate.yaml users add ntr --admin
 poetry run radiotomate -c radio_data/radiotomate.yaml interface --demo --reload
 ```
 
-- UI : http://127.0.0.1:6811  
+- UI HTMX (secours) : http://127.0.0.1:6811
+- Console admin React : http://127.0.0.1:5175 (dev) ou `console/dist` servi par Quart (prod)
 - Compte démo `--demo` : `ntr` / `ntr-demo-change-me` (si `users add` a déjà tourné, utiliser ce compte)
 
 Données locales (gitignorées) : `radio_data/` (SQLite, YAML, carts).

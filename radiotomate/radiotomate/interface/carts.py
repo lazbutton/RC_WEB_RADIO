@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import shutil
@@ -8,9 +9,11 @@ from quart import (
     Blueprint,
     current_app,
     g,
+    jsonify,
     render_template,
     request,
     send_file,
+    send_from_directory,
     url_for,
 )
 from quart_auth import Unauthorized
@@ -19,9 +22,16 @@ from werkzeug.exceptions import BadRequest, Conflict, NotFound
 from radiotomate.auth import current_user, login_required, permission_required
 from radiotomate.enums import CartMode, DayNames, ScheduleMode
 from radiotomate.interface import safe_int, safe_path, stream_form
+from radiotomate.interface.json_util import forbidden_unless, read_json_object
+from radiotomate.interface.spa import console_dist
 from radiotomate.models import Cart, Sound
 from radiotomate.models.cart import URL_TO_AUTODJ_QUEUE
 from radiotomate.scheduler_api import Scheduler
+from radiotomate.services.carts import (
+    assert_cart_deletable,
+    require_cart_version,
+    sync_cart_display_titles,
+)
 from radiotomate.templates import render_macro as general_render_macro
 
 _log = logging.getLogger(__name__)
@@ -117,10 +127,433 @@ def apply_url(cart: Cart, form: dict) -> None:
 
 
 @blueprint.get("/carts")
-@login_required
 async def index():
+    dist = console_dist()
+    if dist is not None:
+        return await send_from_directory(dist, "index.html")
+    if not await current_user.is_authenticated:
+        raise Unauthorized()
     carts = await Cart.all(g.dbsession)
     return await render_template("carts/index.jinja", carts=carts)
+
+
+def _enum_from_json(enum_cls, raw, label: str):
+    text = str(raw or "").strip()
+    if not text:
+        raise BadRequest(f"{label} required")
+    try:
+        return enum_cls(text)
+    except ValueError:
+        pass
+    try:
+        return enum_cls[text]
+    except KeyError as exc:
+        raise BadRequest(f"Incorrect {label}: {text}") from exc
+
+
+def _sound_json(sound: Sound) -> dict:
+    uploader = None
+    if getattr(sound, "uploader", None) is not None:
+        uploader = sound.uploader.username
+    return {
+        "id": sound.id,
+        "rank": sound.rank,
+        "title": sound.title,
+        "duration": sound.duration,
+        "active": sound.active,
+        "available": sound.available,
+        "gain": sound.gain,
+        "peak": sound.peak,
+        "last_played": sound.last_played.isoformat() if sound.last_played else None,
+        "uploader": uploader,
+    }
+
+
+def _cart_queue(cart: Cart) -> str | None:
+    if cart.mode is CartMode.RELAY:
+        return None
+    if cart.url == URL_TO_AUTODJ_QUEUE:
+        return URL_TO_AUTODJ_QUEUE
+    return "carts"
+
+
+def _cart_json(cart: Cart) -> dict:
+    nxt = None
+    if cart.mode is not CartMode.RELAY:
+        nxt = cart.next_sound(for_display=True)
+    return {
+        "id": cart.id,
+        "version": cart.version,
+        "title": cart.title,
+        "notes": cart.notes or "",
+        "mode": cart.mode.value if cart.mode else None,
+        "url": cart.url if cart.mode is CartMode.RELAY else None,
+        "queue": _cart_queue(cart),
+        "max_duration": cart.max_duration,
+        "average_duration": cart.average_duration,
+        "schedule_mode": cart.schedule_mode.value if cart.schedule_mode else None,
+        "schedule_correct": cart.schedule_correct,
+        "schedule_summary": cart.schedule_summary(),
+        "schedule_advanced": cart.schedule_is_advanced,
+        "schedule_year": cart.schedule_year,
+        "schedule_month": cart.schedule_month,
+        "schedule_day": cart.schedule_day,
+        "schedule_week": cart.schedule_week,
+        "schedule_day_of_week": cart.schedule_day_of_week,
+        "schedule_hour": cart.schedule_hour,
+        "schedule_minute": cart.schedule_minute,
+        "schedule_second": cart.schedule_second,
+        "next_sound_id": nxt.id if nxt else None,
+        "sounds": [_sound_json(sound) for sound in cart.sounds],
+    }
+
+
+async def _load_cart_json(cart_id: int) -> Cart | None:
+    return await Cart.from_id(
+        g.dbsession, cart_id, load_sounds=True, load_uploaders=True
+    )
+
+
+def _poke_if_timed(cart: Cart) -> None:
+    if cart.schedule_mode is not ScheduleMode.TIMED:
+        return
+    try:
+        Scheduler.get()
+    except RuntimeError:
+        return
+    current_app.add_background_task(poke_scheduler, cart.id)
+
+
+def _apply_cart_json(cart: Cart, data: dict) -> None:  # noqa: PLR0912
+    if "mode" in data:
+        cart.mode = _enum_from_json(CartMode, data.get("mode"), "mode")
+    if "notes" in data:
+        cart.notes = str(data.get("notes") or "")
+    schedule_keys = {
+        "schedule_mode",
+        "schedule_year",
+        "schedule_month",
+        "schedule_day",
+        "schedule_week",
+        "schedule_day_of_week",
+        "schedule_hour",
+        "schedule_minute",
+        "schedule_second",
+    }
+    if schedule_keys & data.keys():
+        sched_name = ScheduleMode.TIMED.name
+        if cart.schedule_mode:
+            sched_name = cart.schedule_mode.name
+        form = {
+            "schedule": sched_name,
+            "year": cart.schedule_year,
+            "month": cart.schedule_month,
+            "day": cart.schedule_day,
+            "week": cart.schedule_week,
+            "day_of_week": cart.schedule_day_of_week,
+            "hour": cart.schedule_hour,
+            "minute": cart.schedule_minute,
+            "second": cart.schedule_second,
+        }
+        if "schedule_mode" in data:
+            form["schedule"] = _enum_from_json(
+                ScheduleMode, data.get("schedule_mode"), "schedule_mode"
+            ).name
+        mapping = {
+            "schedule_year": "year",
+            "schedule_month": "month",
+            "schedule_day": "day",
+            "schedule_week": "week",
+            "schedule_day_of_week": "day_of_week",
+            "schedule_hour": "hour",
+            "schedule_minute": "minute",
+            "schedule_second": "second",
+        }
+        for json_key, form_key in mapping.items():
+            if json_key in data and data[json_key] is not None:
+                form[form_key] = str(data[json_key])
+        if form["schedule"] == ScheduleMode.TIMED.name:
+            if "schedule_minute" not in data and form.get("minute") in ("", "*"):
+                form["minute"] = "0"
+            if "schedule_second" not in data and form.get("second") in ("", "*"):
+                form["second"] = "0"
+        apply_schedule(cart, form)
+    if "max_duration" in data:
+        raw = data.get("max_duration")
+        if raw in (None, "", 0):
+            cart.max_duration = None
+        else:
+            cart.max_duration = int(raw)
+        if cart.mode is CartMode.RELAY and cart.max_duration is None:
+            raise BadRequest("Stream relays should have a maximum duration")
+    if cart.mode is CartMode.RELAY:
+        if "url" in data:
+            apply_url(cart, {"url": data.get("url")})
+    elif "queue" in data or "url" in data:
+        queue = data.get("queue")
+        if queue is None and data.get("url") == URL_TO_AUTODJ_QUEUE:
+            queue = URL_TO_AUTODJ_QUEUE
+        apply_url(cart, {"queue": queue})
+
+
+async def _rename_cart_title(cart: Cart, title: str) -> None:
+    if title == cart.title:
+        return
+    if await Cart.from_title(g.dbsession, title):
+        raise Conflict(f"Cart {title} already exists")
+    cart.title = title
+    if not cart.path:
+        return
+    cart_root = current_app.config["DATA_ROOT"] / "carts"
+    new_path = safe_path(cart_root, cart.title, prefix=str(cart.id))
+    if new_path != cart.path:
+        cart.path.rename(new_path)
+        await Sound.change_path_prefix(
+            g.dbsession,
+            cart.id,
+            old=cart.path,
+            new=new_path,
+        )
+        cart.path = new_path
+    await sync_cart_display_titles(g.dbsession, cart)
+
+
+@blueprint.get("/carts.json")
+@login_required
+async def carts_json():
+    carts = await Cart.all(g.dbsession, load_sounds=True, load_uploaders=True)
+    return jsonify({"carts": [_cart_json(cart) for cart in carts]})
+
+
+@blueprint.post("/carts.json")
+@login_required
+async def create_cart_json():
+    deny = forbidden_unless("carts")
+    if deny:
+        return deny
+    data = await read_json_object()
+    title = str(data.get("title") or "").strip()
+    if not title:
+        raise BadRequest("Please provide a title")
+    if await Cart.from_title(g.dbsession, title):
+        raise Conflict(f"Cart {title} already exists")
+    cart = Cart(title=title, notes=str(data.get("notes") or ""), url="")
+    mode_raw = str(data.get("mode") or CartMode.PLAYLIST.value)
+    cart.mode = _enum_from_json(CartMode, mode_raw, "mode")
+    schedule_raw = str(data.get("schedule_mode") or ScheduleMode.TIMED.value)
+    cart.schedule_mode = _enum_from_json(ScheduleMode, schedule_raw, "schedule_mode")
+    _apply_cart_json(cart, data)
+    g.dbsession.add(cart)
+    await g.dbsession.commit()
+    cart_root = current_app.config["DATA_ROOT"] / "carts"
+    cart.path = safe_path(cart_root, title, prefix=str(cart.id))
+    cart.path.mkdir(parents=True)
+    await g.dbsession.commit()
+    _poke_if_timed(cart)
+    cart = await _load_cart_json(cart.id)
+    return jsonify({"cart": _cart_json(cart)}), 201
+
+
+@blueprint.put("/carts/<int:cart_id>.json")
+@login_required
+async def update_cart_json(cart_id: int):
+    deny = forbidden_unless("carts")
+    if deny:
+        return deny
+    cart = await _load_cart_json(cart_id)
+    if not cart:
+        raise NotFound(f"Cart {cart_id} not found")
+    data = await read_json_object()
+    require_cart_version(cart, data.get("version"))
+    if "title" in data:
+        title = str(data.get("title") or "").strip()
+        if not title:
+            raise BadRequest("Please provide a title")
+        await _rename_cart_title(cart, title)
+    _apply_cart_json(cart, data)
+    await g.dbsession.commit()
+    _poke_if_timed(cart)
+    cart = await _load_cart_json(cart.id)
+    return jsonify({"cart": _cart_json(cart)})
+
+
+@blueprint.delete("/carts/<int:cart_id>.json")
+@login_required
+async def delete_cart_json(cart_id: int):
+    deny = forbidden_unless("carts")
+    if deny:
+        return deny
+    cart = await Cart.from_id(g.dbsession, cart_id)
+    if not cart:
+        raise NotFound(f"Cart {cart_id} not found")
+    await assert_cart_deletable(g.dbsession, cart)
+    if cart.path:
+        shutil.rmtree(cart.path, ignore_errors=True)
+    await g.dbsession.delete(cart)
+    await g.dbsession.commit()
+    return jsonify({"ok": True})
+
+
+async def _ingest_json_uploads(cart_id: int, uploads: list) -> list[Sound]:
+    """Keep audio files; skip junk from a dropped folder (.DS_Store, images…)."""
+    added: list[Sound] = []
+    rank = await Sound.next_rank(g.dbsession, cart_id)
+    for uploaded_file in uploads:
+        path = uploaded_file["uploaded_to"]
+        try:
+            metadata = mutagen.File(path)
+        except Exception:
+            metadata = None
+        info = getattr(metadata, "info", None)
+        length = getattr(info, "length", None)
+        if metadata is None or length is None:
+            with contextlib.suppress(OSError):
+                path.unlink(missing_ok=True)
+            continue
+        sound = Sound(
+            cart_id=cart_id,
+            rank=rank,
+            title=uploaded_file["filename"],
+            path=path,
+            duration=int(length),
+            uploader_id=current_user.user.id,
+        )
+        added.append(sound)
+        g.dbsession.add(sound)
+        rank += 1
+    return added
+
+
+@blueprint.post("/carts/<int:cart_id>/sounds.json")
+@login_required
+async def add_sounds_json(cart_id: int):
+    deny = forbidden_unless("carts")
+    if deny:
+        return deny
+    cart = await Cart.from_id(g.dbsession, cart_id)
+    if not cart:
+        raise NotFound(f"Cart {cart_id} not found")
+    form = await stream_form(cart.path)
+    uploads = form.getall("sounds") or form.getall("file")
+    if not uploads:
+        raise BadRequest("No sound file uploaded")
+    added_sounds = await _ingest_json_uploads(cart_id, uploads)
+    if not added_sounds:
+        raise BadRequest("No audio file uploaded")
+    await g.dbsession.commit()
+    try:
+        await Scheduler.get().queue_analysis([s.id for s in added_sounds])
+    except RuntimeError:
+        _log.debug("Scheduler is not initialized; skipping analysis queue")
+    cart = await _load_cart_json(cart_id)
+    return jsonify({"cart": _cart_json(cart)}), 201
+
+
+@blueprint.post("/carts/<int:cart_id>/sounds/delete.json")
+@login_required
+async def delete_sounds_json(cart_id: int):
+    deny = forbidden_unless("carts")
+    if deny:
+        return deny
+    cart = await Cart.from_id(g.dbsession, cart_id)
+    if not cart:
+        raise NotFound(f"Cart {cart_id} not found")
+    data = await read_json_object()
+    raw_ids = data.get("ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise BadRequest("ids list required")
+    seen: set[int] = set()
+    for raw in raw_ids:
+        try:
+            sound_id = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise BadRequest("invalid sound id") from exc
+        if sound_id in seen:
+            continue
+        seen.add(sound_id)
+        sound = await Sound.from_id(g.dbsession, sound_id)
+        if not sound or sound.cart_id != cart_id:
+            raise NotFound(f"Sound {sound_id} not found")
+        if sound.path:
+            sound.path.unlink(missing_ok=True)
+        await g.dbsession.delete(sound)
+    await g.dbsession.flush()
+    await Sound.update_ranks(g.dbsession, cart_id)
+    await g.dbsession.commit()
+    cart = await _load_cart_json(cart_id)
+    return jsonify({"cart": _cart_json(cart)})
+
+
+@blueprint.delete("/carts/<int:cart_id>/sounds/<int:sound_id>.json")
+@login_required
+async def delete_sound_json(cart_id: int, sound_id: int):
+    deny = forbidden_unless("carts")
+    if deny:
+        return deny
+    sound = await Sound.from_id(g.dbsession, sound_id)
+    if not sound or sound.cart_id != cart_id:
+        raise NotFound(f"Sound {sound_id} not found")
+    if sound.path:
+        sound.path.unlink(missing_ok=True)
+    await g.dbsession.delete(sound)
+    await g.dbsession.flush()
+    await Sound.update_ranks(g.dbsession, cart_id)
+    await g.dbsession.commit()
+    cart = await _load_cart_json(cart_id)
+    return jsonify({"cart": _cart_json(cart)})
+
+
+@blueprint.put("/carts/<int:cart_id>/sounds/<int:sound_id>.json")
+@login_required
+async def update_sound_json(cart_id: int, sound_id: int):
+    deny = forbidden_unless("carts")
+    if deny:
+        return deny
+    sound = await Sound.from_id(g.dbsession, sound_id)
+    if not sound or sound.cart_id != cart_id:
+        raise NotFound(f"Sound {sound_id} not found")
+    data = await read_json_object()
+    if "title" in data:
+        title = str(data.get("title") or "").strip()
+        if not title:
+            raise BadRequest("Please provide a title")
+        sound.title = title
+    if "active" in data:
+        sound.active = bool(data.get("active"))
+    await g.dbsession.commit()
+    cart = await _load_cart_json(cart_id)
+    return jsonify({"cart": _cart_json(cart), "sound": _sound_json(sound)})
+
+
+@blueprint.put("/carts/<int:cart_id>/sounds/ranks.json")
+@login_required
+async def update_sound_ranks_json(cart_id: int):
+    deny = forbidden_unless("carts")
+    if deny:
+        return deny
+    cart = await Cart.from_id(g.dbsession, cart_id)
+    if not cart:
+        raise NotFound(f"Cart {cart_id} not found")
+    data = await read_json_object()
+    ranks = data.get("ranks")
+    if not isinstance(ranks, list) or not ranks:
+        raise BadRequest("ranks list required")
+    rank = 1
+    for raw_id in ranks:
+        try:
+            sound_id = int(raw_id)
+        except (TypeError, ValueError) as exc:
+            raise BadRequest("invalid sound id") from exc
+        sound = await Sound.from_id(g.dbsession, sound_id)
+        if not sound:
+            raise NotFound(f"Sound {sound_id} not found")
+        if sound.cart_id != cart_id:
+            raise BadRequest(f"Sound {sound_id} is not in cart {cart_id}")
+        sound.rank = rank
+        rank += 1
+    await g.dbsession.commit()
+    cart = await _load_cart_json(cart_id)
+    return jsonify({"cart": _cart_json(cart)})
 
 
 @blueprint.get("/carts/add")
@@ -221,6 +654,7 @@ async def edit(cart_id: int):
                 new=new_path,
             )
             cart.path = new_path
+        await sync_cart_display_titles(g.dbsession, cart)
 
     cart.notes = form.get("notes")
 
@@ -263,6 +697,7 @@ async def delete(cart_id: int):
     cart = await Cart.from_id(g.dbsession, cart_id)
     if not cart:
         raise NotFound(f"Cart {cart_id} not found")
+    await assert_cart_deletable(g.dbsession, cart)
     shutil.rmtree(cart.path)
     await g.dbsession.delete(cart)
     await g.dbsession.commit()
@@ -295,6 +730,39 @@ async def push_now(cart_id: int):
             ),
         },
     )
+
+
+@blueprint.post("/carts/<int:cart_id>/now.json")
+@login_required
+async def push_now_json(cart_id: int):
+    if not current_user.user.can_live():
+        return jsonify({"error": "forbidden"}), 403
+    cart = await Cart.from_id(g.dbsession, cart_id)
+    if not cart:
+        return jsonify({"error": "not_found"}), 404
+    try:
+        await Scheduler.get().push_cart(cart_id)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True})
+
+
+@blueprint.post("/carts/<int:cart_id>/sounds/<int:sound_id>/now.json")
+@login_required
+async def push_sound_now_json(cart_id: int, sound_id: int):
+    if not current_user.user.can_live():
+        return jsonify({"error": "forbidden"}), 403
+    cart = await Cart.from_id(g.dbsession, cart_id, load_sounds=True)
+    if not cart:
+        return jsonify({"error": "not_found"}), 404
+    sound = next((row for row in cart.sounds if row.id == sound_id), None)
+    if not sound:
+        return jsonify({"error": "not_found"}), 404
+    try:
+        await Scheduler.get().push_sound(cart_id, sound_id)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True})
 
 
 @blueprint.get("/carts/<int:cart_id>/sounds")

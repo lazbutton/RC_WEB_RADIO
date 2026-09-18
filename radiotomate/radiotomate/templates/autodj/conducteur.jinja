@@ -1,0 +1,55 @@
+{% extends 'layout.jinja' %}
+{% block title %}Conducteur{% endblock title %}
+
+{% block content %}
+<section class="content">
+<div class="container">
+<h1>Conducteur</h1>
+<p class="ntr-help">
+    Horloge <strong>{{ clock }}</strong>
+    · daypart <strong>{{ daypart }}</strong>
+    · à partir de {{ now_label }}
+    · fenêtre {{ horizon_min }}&nbsp;min
+</p>
+<p>
+    <a class="button" href="{{ url_for('autodj.index') }}">Calendrier Auto-DJ</a>
+    <a class="button" href="{{ url_for('autodj.conducteur_json') }}">JSON</a>
+</p>
+
+{% if items %}
+<table class="table is-striped is-fullwidth is-hoverable">
+    <thead>
+        <tr>
+            <th>Heure</th>
+            <th>Type</th>
+            <th>Ressource</th>
+            <th>Quand</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in items %}
+        <tr>
+            <td>{{ item.at_label }}</td>
+            <td>{{ item.kind }}</td>
+            <td>
+                {{ item.resource }}
+                {% if item.status == 'secours' %}
+                    <span class="tag is-warning">secours</span>
+                {% endif %}
+            </td>
+            <td>{{ item.when_label }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="ntr-help">Aucun item prévu pour cette fenêtre.</p>
+{% endif %}
+
+<p class="ntr-help">
+    Prévisionnel d’horloge auto-DJ (pas le conducteur station live / relais).
+    Recalculé à chaque ouverture, sans pousser Liquidsoap.
+</p>
+</div>
+</section>
+{% endblock %}

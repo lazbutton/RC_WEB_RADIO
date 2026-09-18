@@ -5,21 +5,19 @@ Note that in this module Cart.id is usually a string, because it is also used as
 Schedule ID and APScheduler prefers strings.
 """
 
-import json
 import logging
 from datetime import datetime, timedelta
 
 from apscheduler import CoalescePolicy, ScheduleLookupError
 from apscheduler.triggers.date import DateTrigger
-from httpx import AsyncClient
 from quart import Blueprint, current_app, g
 from sqlalchemy.orm import Session as ormSession
 from werkzeug.exceptions import BadRequest
 
 from radiotomate.auth import token_required
 from radiotomate.enums import CartMode, ScheduleMode
-from radiotomate.models import Cart
-from radiotomate.models.cart import URL_TO_AUTODJ_QUEUE
+from radiotomate.models import Cart, Sound
+from radiotomate.scheduler.playout import PlayoutGateway, gateway_for
 
 _log = logging.getLogger(__name__)
 
@@ -28,95 +26,114 @@ blueprint = Blueprint("schedule", __name__)
 
 async def skip_cart(session: ormSession, current_app, sound_id: int | None = None):
     _log.debug("starting skip_cart(%r)", sound_id)
-    playout_client: AsyncClient = current_app.config["PLAYOUT_CLIENT"]
+    gateway = gateway_for(current_app.config["PLAYOUT_CLIENT"])
     if sound_id is None:
         params = {"relay": 1}
     else:
         params = {"radiotomate_sound_id": sound_id}
-    response = await playout_client.delete("/live", params=params)
-    if response.status_code == 204:
+    result = await gateway.skip(params)
+    if result.status_code == 204:
         _log.info("No max duration to enforce for sound#%r", sound_id)
-    elif response.status_code != 200:
-        msg = response.text
-        _log.error("Enforcing max duration on sound#%r failed: %s", sound_id, msg)
+    elif not result.ok:
+        _log.error(
+            "Enforcing max duration on sound#%r failed: %s",
+            sound_id,
+            result.error,
+        )
 
 
 async def push_cart(session: ormSession, current_app, cart_id: int):
     _log.debug("starting push_cart(%d)", cart_id)
-    playout_client = current_app.config["PLAYOUT_CLIENT"]
+    gateway = gateway_for(current_app.config["PLAYOUT_CLIENT"])
     cart = await Cart.from_id(session, cart_id, load_sounds=True)
     if not cart:
         _log.warning(f"Scheduled cart #{cart_id} not found")
         return
     if cart.mode == CartMode.RELAY:
-        await _push_cart_relay(cart, playout_client, current_app)
+        await _push_cart_relay(cart, gateway, current_app)
     else:
-        await _push_cart_sound(cart, playout_client, current_app)
+        await _push_cart_sound(cart, gateway, current_app)
 
 
-async def _push_cart_sound(cart: Cart, playout_client: AsyncClient, current_app):
+async def push_named_sound(
+    session: ormSession, current_app, cart_id: int, sound_id: int,
+):
+    _log.debug("starting push_named_sound(%d, %d)", cart_id, sound_id)
+    gateway = gateway_for(current_app.config["PLAYOUT_CLIENT"])
+    cart = await Cart.from_id(session, cart_id, load_sounds=True)
+    if not cart:
+        _log.warning("Cart #%d not found", cart_id)
+        return False
+    sound = next((row for row in cart.sounds if row.id == sound_id), None)
+    if not sound:
+        _log.warning("Sound #%d not in cart #%d", sound_id, cart_id)
+        return False
+    await _enqueue_sound(cart, sound, gateway, current_app)
+    return True
+
+
+async def _push_cart_sound(cart: Cart, gateway: PlayoutGateway, current_app):
     sound = cart.next_sound()
     if sound:
-        queue = "carts"
-        if cart.url == URL_TO_AUTODJ_QUEUE:
-            queue = URL_TO_AUTODJ_QUEUE
-        response = await playout_client.post(
-            f"/queue/{queue}",
-            json={
-                "path": str(sound.path),
-                "artist": cart.title,
-                "title": sound.title,
-                "radiotomate_sound_id": sound.id,
-                "rg_track_gain": str(sound.gain),
-            },
-        )
-        if response.status_code == 200:
-            result = response.json()
-            _log.info(
-                "Pushed cart %d sound %s:%s as RID %s",
-                cart.id,
-                sound.id,
-                sound.path,
-                result,
-            )
-            if cart.max_duration:
-                # remove a potential previous entry
-                await current_app.scheduler.remove_schedule(str(-cart.id))
-                when = datetime.now() + timedelta(seconds=cart.max_duration)
-                await current_app.scheduler.add_schedule(
-                    skip_cart,
-                    DateTrigger(when),
-                    id=str(-cart.id),
-                    args=[int(sound.id)],
-                    coalesce=CoalescePolicy.latest,
-                    misfire_grace_time=10.0,
-                )
-
-        else:
-            try:
-                result = response.json()
-            except json.JSONDecodeError:
-                result = response.text
-            _log.error(
-                "Error while pushing cart %d sound %s:%s: %s",
-                cart.id,
-                sound.id,
-                sound.path,
-                result,
-            )
+        await _enqueue_sound(cart, sound, gateway, current_app)
     else:
         _log.warning("Scheduled cart %d:%s has no next sound", cart.id, cart.title)
 
 
-async def _push_cart_relay(cart: Cart, playout_client: AsyncClient, current_app):
-    response = await playout_client.post("/relay", params={"url": cart.url})
-    if response.status_code == 200:
-        result = response.json()
+async def _enqueue_sound(
+    cart: Cart,
+    sound: Sound,
+    gateway: PlayoutGateway,
+    current_app,
+):
+    queue = cart.playout_queue()
+    result = await gateway.queue(
+        queue,
+        {
+            "path": str(sound.path),
+            "artist": cart.title,
+            "title": sound.title,
+            "radiotomate_sound_id": sound.id,
+            "rg_track_gain": str(sound.gain),
+        },
+    )
+    if result.ok:
+        _log.info(
+            "Pushed cart %d sound %s:%s as RID %s",
+            cart.id,
+            sound.id,
+            sound.path,
+            result.payload,
+        )
+        if cart.max_duration:
+            await current_app.scheduler.remove_schedule(str(-cart.id))
+            when = datetime.now() + timedelta(seconds=cart.max_duration)
+            await current_app.scheduler.add_schedule(
+                skip_cart,
+                DateTrigger(when),
+                id=str(-cart.id),
+                args=[int(sound.id)],
+                coalesce=CoalescePolicy.latest,
+                misfire_grace_time=10.0,
+            )
+    else:
+        _log.error(
+            "Error while pushing cart %d sound %s:%s: %s",
+            cart.id,
+            sound.id,
+            sound.path,
+            result.error,
+        )
+
+
+async def _push_cart_relay(cart: Cart, gateway: PlayoutGateway, current_app):
+    result = await gateway.relay_start(cart.url)
+    if result.ok:
         _log.info(
             "Pushed relay cart %d: %s | status: %s",
             cart.id,
             cart.url,
-            result,
+            result.payload,
         )
         if cart.max_duration:
             # remove a potential previous entry
@@ -134,11 +151,7 @@ async def _push_cart_relay(cart: Cart, playout_client: AsyncClient, current_app)
                 "relay cart %d has no maximum duration! might play forever.", cart.id
             )
     else:
-        try:
-            result = response.json()
-        except json.JSONDecodeError:
-            result = response.text
-        _log.error("Error while pushing relay cart %d:%s: %s", cart.id, result)
+        _log.error("Error while pushing relay cart %d:%s: %s", cart.id, result.error)
 
 
 @blueprint.put("/schedule/<cart_id>")
@@ -204,4 +217,18 @@ async def push_now(cart_id: str):
     if not cart:
         return f"cart #{cart_id} not found", 404
     await push_cart(g.dbsession, current_app, cid)
+    return "", 200
+
+
+@blueprint.post("/schedule/<cart_id>/sounds/<sound_id>/now")
+@token_required
+async def push_sound_now(cart_id: str, sound_id: str):
+    try:
+        cid = int(cart_id)
+        sid = int(sound_id)
+    except ValueError:
+        return "cart or sound not found", 404
+    ok = await push_named_sound(g.dbsession, current_app, cid, sid)
+    if not ok:
+        return "cart or sound not found", 404
     return "", 200

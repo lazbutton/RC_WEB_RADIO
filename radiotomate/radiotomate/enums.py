@@ -50,6 +50,53 @@ class ScheduleMode(Enum):
                 return "Timed"
 
 
+class PositionKind(Enum):
+    MUSIQUE = "musique"
+    JINGLE = "jingle"
+    SON = "son"
+    PUB = "pub"
+
+
+class WhenMode(Enum):
+    SEQUENTIAL = "sequential"
+    ANCHORED = "anchored"
+
+
+class SyncMode(Enum):
+    DURE = "dure"
+    MOLLE = "molle"
+
+
+class RundownStatus(Enum):
+    PLANNED = "planned"
+    RESERVED = "reserved"
+    PENDING_PUSH = "pending_push"
+    SENT = "sent"
+    ACCEPTED = "accepted"
+    IN_QUEUE = "in_queue"
+    ON_AIR = "on_air"
+    PLAYED = "played"
+    SKIPPED = "skipped"
+    REPLACED = "replaced"
+    RESCUE = "rescue"
+    FAILED = "failed"
+
+
+class CommandStatus(Enum):
+    PENDING = "pending"
+    SENDING = "sending"
+    ACKNOWLEDGED = "acknowledged"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class PlayoutAction(Enum):
+    QUEUE = "queue"
+    SKIP = "skip"
+    RELAY_START = "relay_start"
+    RELAY_STOP = "relay_stop"
+
+
 class DayNames(IntEnum):
     MONDAY = 0
     TUESDAY = 1

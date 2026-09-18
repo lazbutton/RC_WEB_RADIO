@@ -1,8 +1,9 @@
 import logging
 
-from quart import Blueprint, render_template
+from quart import Blueprint, render_template, send_from_directory
+from quart_auth import Unauthorized, current_user
 
-from radiotomate.auth import login_required
+from radiotomate.interface.spa import console_dist
 
 _log = logging.getLogger(__name__)
 
@@ -11,6 +12,10 @@ watching_clients = set()
 
 
 @blueprint.get("/")
-@login_required
 async def index():
+    dist = console_dist()
+    if dist is not None:
+        return await send_from_directory(dist, "index.html")
+    if not await current_user.is_authenticated:
+        raise Unauthorized()
     return await render_template("home/index.jinja")

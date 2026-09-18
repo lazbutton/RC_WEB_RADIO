@@ -1,11 +1,13 @@
 import json
 import logging
+import math
 from asyncio import Queue
 from datetime import datetime
 from http.client import HTTPException
 
 from hypercorn.utils import ShutdownError
-from quart import Blueprint, make_response, request
+from quart import Blueprint, jsonify, make_response, request
+from quart_auth import current_user
 
 from radiotomate.auth import login_required, permission_required
 from radiotomate.quart import or_shutdown
@@ -16,10 +18,74 @@ _log = logging.getLogger(__name__)
 
 blueprint = Blueprint("live", __name__, template_folder="templates")
 watching_clients = set()
+_latest_live: dict[str, dict | None] = {"payload": None}
 
 
 async def render_macro(macro, **kwargs) -> str:
     return await general_render_macro("live/macros.jinja", macro, **kwargs)
+
+
+def set_live_snapshot(payload: dict | None) -> None:
+    _latest_live["payload"] = payload
+
+
+def get_live_snapshot() -> dict:
+    cached = _latest_live["payload"]
+    if cached is None:
+        return {"status": "offline"}
+    return cached
+
+
+def _float_field(value: object, default: float = 0.0) -> float:
+    try:
+        number = float(value if value is not None else default)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if math.isnan(number) or math.isinf(number):
+        return default
+    return number
+
+
+def _cue(value: object) -> dict | None:
+    parsed = value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(parsed, dict):
+        return None
+    try:
+        rid = int(parsed.get("rid", -1))
+    except (TypeError, ValueError):
+        rid = -1
+    if rid < 0:
+        return None
+    return {
+        "title": str(parsed.get("title") or "").strip(),
+        "artist": str(parsed.get("artist") or "").strip(),
+        "rid": rid,
+        "initial_uri": str(parsed.get("initial_uri") or ""),
+    }
+
+
+def normalize_live(md: dict) -> dict:
+    raw_status = str(md.get("status") or "")
+    status = "simulating" if raw_status == "simulating" else "playing"
+    return {
+        "status": status,
+        "source": str(md.get("source") or ""),
+        "artist": str(md.get("artist") or ""),
+        "title": str(md.get("title") or ""),
+        "album": str(md.get("album") or ""),
+        "kind": str(md.get("kind") or ""),
+        "remaining": _float_field(md.get("remaining")),
+        "elapsed": _float_field(md.get("elapsed")),
+        "on_air": str(md.get("on_air") or md.get("time") or ""),
+        "next_autodj": _cue(md.get("next_autodj")),
+        "next_jingle": _cue(md.get("next_jingle")),
+        "next_cart": _cue(md.get("next_cart")),
+    }
 
 
 @blueprint.get("/live")
@@ -59,12 +125,19 @@ async def get():
     return response
 
 
+@blueprint.get("/live.json")
+@login_required
+async def live_json():
+    return jsonify(get_live_snapshot())
+
+
 async def watch_livedata_task():
     async for md in Scheduler.get().live():
         try:
-            remaining = round(float(md.get("remaining", 0.0)))
+            remaining = round(_float_field(md.get("remaining", 0.0)))
         except OverflowError:  # liquidsoap may send "inf"
             remaining = 0
+        set_live_snapshot(normalize_live(md))
         if md.get("elapsed"):
             md["elapsed"] = round(float(md.get("elapsed")))
         if md.get("time"):
@@ -89,3 +162,12 @@ async def watch_livedata_task():
 async def skip():
     await (Scheduler.get()).skip()
     return "", 200
+
+
+@blueprint.delete("/live.json")
+@login_required
+async def skip_json():
+    if not current_user.user.can_live():
+        return jsonify({"error": "forbidden"}), 403
+    await Scheduler.get().skip()
+    return jsonify({"ok": True})

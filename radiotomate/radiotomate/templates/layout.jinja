@@ -12,6 +12,9 @@
         <link href="{{ url_for("static", filename="AtkinsonHyperlegible/AtkinsonHyperlegible.css") }}" rel="stylesheet">
         <link href="{{ url_for("static", filename="radiotomate.css") }}" rel="stylesheet">
         <link href="{{ url_for("static", filename="ntr.css") }}" rel="stylesheet">
+        {% if current_user.is_authenticated %}
+        <meta name="csrf-token" content="{{ csrf_token() }}">
+        {% endif %}
         <script defer src="{{ url_for("static", filename="htmx.min.js") }}"></script>
         <script defer src="{{ url_for("static", filename="htmx-sse.js") }}"></script>
         <script defer src="{{ url_for("static", filename="sweetalert2-11.7.31.js") }}"></script>
@@ -39,7 +42,8 @@
             <nav class="ntr-nav" aria-label="Console">
                 {{ menu_item("home.index", "Antenne", in_blueprint('home')) }}
                 {{ menu_item("carts.index", "Carts", in_blueprint('carts')) }}
-                {{ menu_item("autodj.index", "Auto-DJ", in_blueprint('autodj')) }}
+                {{ menu_item("autodj.index", "Auto-DJ", in_blueprint('autodj') and request.endpoint and 'conducteur' not in request.endpoint) }}
+                {{ menu_item("autodj.conducteur", "Conducteur", request.endpoint in ('autodj.conducteur', 'autodj.conducteur_json')) }}
                 {% if current_user.user.can_admin() %}
                     {{ menu_item("users.index", "Comptes", in_blueprint('users')) }}
                 {% endif %}

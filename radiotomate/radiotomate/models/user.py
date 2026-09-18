@@ -95,6 +95,18 @@ class User(Base):
                 permissions[perm] = True
         self.permissions = permissions
 
+    def update_permissions_map(self, perms: dict | None):
+        permissions = {}
+        raw = perms or {}
+        for perm in PERMISSION_NAMES:
+            value = raw.get(perm, raw.get(f"can_{perm}"))
+            if value in (True, "true", "1", 1):
+                permissions[perm] = True
+        self.permissions = permissions
+
+    def permissions_payload(self) -> dict[str, bool]:
+        return {perm: bool(self.permissions.get(perm)) for perm in PERMISSION_NAMES}
+
     def can_admin(self) -> bool:
         return self.permissions.get("admin", False)
 

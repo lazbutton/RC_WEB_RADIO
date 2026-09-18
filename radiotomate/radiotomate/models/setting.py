@@ -31,6 +31,14 @@ class Setting(Base):
         return await session.scalar(select(Setting).filter(Setting.key == key))
 
     @classmethod
+    async def upsert(cls, session: Session, key: str, value: str) -> None:
+        row = await cls.from_key(session, key)
+        if row is None:
+            session.add(cls(key=key, value=value))
+        else:
+            row.value = value
+
+    @classmethod
     async def load_all(cls, session: Session) -> dict:
         settings = {}
         rows = await session.scalars(select(Setting))

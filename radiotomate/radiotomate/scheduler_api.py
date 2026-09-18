@@ -11,15 +11,30 @@ from __future__ import annotations
 import json
 import logging
 import random
-from asyncio import sleep
-from datetime import datetime
+import urllib.error
+import urllib.request
+from asyncio import Lock, sleep
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
 
+from radiotomate.beets import BeetsIntegration
 from radiotomate.db import QuartAlchemy
-from radiotomate.models import Sound
+from radiotomate.domain.execution import rundown_summary
+from radiotomate.models import Cart, Sound
 from radiotomate.quart import ShutdownError, or_shutdown
+from radiotomate.scheduler.clock import (
+    advance_sequencer_cursor,
+    now_paris,
+)
+from radiotomate.scheduler.execution import published_rundown
+from radiotomate.scheduler.rundown import (
+    DEFAULT_CART_SEC,
+    DEFAULT_MUSIC_SEC,
+    build_rundown,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -59,6 +74,10 @@ class Scheduler:
         return cls._instance
 
     @classmethod
+    def reset_instance(cls) -> None:
+        cls._instance = None
+
+    @classmethod
     async def after_serving(cls) -> None:
         if cls._instance:
             await cls._instance.client.aclose()
@@ -73,6 +92,9 @@ class Scheduler:
 
     async def skip(self):
         await self.client.delete("/live")
+
+    async def live_rundown(self, session, beets, horizon_min: int = 30) -> dict:
+        return await published_rundown(session, beets, horizon_min=horizon_min)
 
     async def live(self) -> AsyncGenerator[dict, None]:
         sleeptime = 10
@@ -129,6 +151,19 @@ class Scheduler:
             )
             raise RuntimeError(result.text or f"HTTP {result.status_code}")
 
+    async def push_sound(self, cart_id: int, sound_id: int):
+        _log.debug("Pushing cart %d sound %d now", cart_id, sound_id)
+        result = await self.client.post(f"/schedule/{cart_id}/sounds/{sound_id}/now")
+        if result.status_code != 200:
+            _log.error(
+                "Error while pushing sound %d of cart %d: %s %s",
+                sound_id,
+                cart_id,
+                result.status_code,
+                result.text,
+            )
+            raise RuntimeError(result.text or f"HTTP {result.status_code}")
+
     async def queue_analysis(self, sound_ids: list[int]):
         _log.debug("Queueing sounds for analysis: %r", sound_ids)
         result = await self.client.post(
@@ -169,13 +204,16 @@ def artistic_generator():
     return " ".join([WORDS[random.randint(0, len(WORDS) - 1)] for i in range(2)])
 
 
+def demo_cue_path(data_root: Path) -> Path | None:
+    ops_data = data_root.resolve().parent.parent / "ops" / "local" / "data"
+    if ops_data.is_dir():
+        return ops_data / "playout.json"
+    return None
+
+
 class SchedulerDemo(Scheduler):
     """
-    Demo/tests mode: in that case there is no scheduler process, so we override
-    everything.
-
-    In that case the `client` instance actualy points to the interface app,
-    so this can emulate playing metadata.
+    Demo/tests mode: no scheduler process. Now / skip / fire follow the clock rundown.
     """
 
     TRACK_LENGTH = 180
@@ -189,22 +227,300 @@ class SchedulerDemo(Scheduler):
         )
         self._started_at = datetime.now().replace(microsecond=0)
         self._on_air = datetime.now().replace(microsecond=0)
-        self._i = 0
-        self._metadata = self.generate_metadata()
         self.app = app
+        self._lock = Lock()
+        self._items: list[dict] = []
+        self._forecast: list[dict] = []
+        self._forecast_horizon = 0
+        self._played: list[dict] = []
+        self._rundown_meta: dict = {"horizon_min": 30, "clock": None, "daypart": None}
+        self._override: dict | None = None
+        self._track_length = float(self.TRACK_LENGTH)
+        self._metadata = self._placeholder_metadata()
+        self._bootstrapped = False
+        self._data_root = Path(config.get("data", {}).get("root") or ".")
+        self._relay_to = list(config.get("metadata_log", {}).get("relay_to") or [])
+        self._cue_path = demo_cue_path(self._data_root)
+        self._last_broadcast: tuple | None = None
+
+    def _placeholder_metadata(self) -> dict:
+        return {
+            "artist": "",
+            "title": "Pas d'horloge",
+            "source": "autodj",
+            "kind": "musique",
+            "status": "simulating",
+            "initial_uri": "",
+            "album": "",
+            "editor": "demo",
+            "uptime": self.uptime(),
+            "on_air": self._on_air.isoformat(),
+            "next_cart": {"rid": -1},
+            "next_autodj": {"rid": -1},
+            "next_jingle": {"rid": -1},
+        }
+
+    def uptime(self) -> str:
+        uptime = datetime.now().replace(microsecond=0) - self._started_at
+        return str(uptime)
+
+    def _split_resource(self, resource: str) -> tuple[str, str]:
+        if " — " in resource:
+            artist, title = resource.split(" — ", 1)
+            return artist.strip(), title.strip()
+        return "", resource.strip()
+
+    def _empty_cue(self) -> dict:
+        return {"rid": -1}
+
+    def _cue_from_item(self, item: dict, rid: int) -> dict:
+        artist, title = self._split_resource(str(item.get("resource") or ""))
+        return {
+            "title": title,
+            "artist": artist or str(item.get("cart") or item.get("category") or ""),
+            "rid": rid,
+            "initial_uri": "",
+        }
+
+    def _cues_from(self, items: list[dict]) -> dict:
+        next_autodj = self._empty_cue()
+        next_jingle = self._empty_cue()
+        next_cart = self._empty_cue()
+        for index, item in enumerate(items, start=1):
+            cue = self._cue_from_item(item, index)
+            queue = item.get("queue")
+            if queue == "autodj" and next_autodj.get("rid") == -1:
+                next_autodj = cue
+            elif queue == "jingles" and next_jingle.get("rid") == -1:
+                next_jingle = cue
+            elif queue == "carts" and next_cart.get("rid") == -1:
+                next_cart = cue
+        return {
+            "next_autodj": next_autodj,
+            "next_jingle": next_jingle,
+            "next_cart": next_cart,
+        }
+
+    def _duration_for(self, item: dict) -> float:
+        try:
+            value = float(item.get("duration") or 0)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 0:
+            return value
+        if item.get("kind") == "musique":
+            return DEFAULT_MUSIC_SEC
+        return DEFAULT_CART_SEC
+
+    def _abs_media(self, raw: object) -> str:
+        text = str(raw or "").strip()
+        if not text:
+            return ""
+        path = Path(text)
+        if path.is_file():
+            return str(path)
+        joined = self._data_root / text
+        if joined.is_file():
+            return str(joined)
+        return text
+
+    def _broadcast_now(self) -> None:
+        started = datetime.now(timezone.utc)
+        body = {
+            "artist": self._metadata.get("artist") or "",
+            "title": self._metadata.get("title") or "",
+            "album": self._metadata.get("album") or "",
+            "duration": self._track_length,
+            "started_at": started.isoformat(),
+            "source": self._metadata.get("source") or "autodj",
+            "SOURCE_NAME": "new-trad-radio",
+            "path": self._metadata.get("initial_uri") or "",
+            "on_air": self._on_air.isoformat(),
+        }
+        key = (body["artist"], body["title"], body["path"], body["on_air"])
+        if key == self._last_broadcast:
+            return
+        self._last_broadcast = key
+        if self._cue_path is not None:
+            try:
+                self._cue_path.parent.mkdir(parents=True, exist_ok=True)
+                self._cue_path.write_text(
+                    json.dumps(body, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                _log.debug("demo playout cue: %s", exc)
+        for target in self._relay_to:
+            if not isinstance(target, dict):
+                continue
+            url = target.get("url")
+            if not url:
+                continue
+            payload = dict(target.get("add_field") or {})
+            payload.update(body)
+            headers = {"Content-Type": "application/json"}
+            extra = target.get("add_header") or {}
+            headers.update(extra)
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    method="POST",
+                    headers=headers,
+                )
+                with urllib.request.urlopen(req, timeout=2) as response:
+                    response.read()
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                _log.debug("demo nowplaying relay: %s", exc)
+
+    def _apply_current(self) -> None:
+        cues = self._cues_from(self._items[1:] if self._items else [])
+        if self._override is not None:
+            self._metadata = {**self._override, **cues}
+            self._publish()
+            self._broadcast_now()
+            return
+        if not self._items:
+            self._track_length = float(self.TRACK_LENGTH)
+            self._metadata = {**self._placeholder_metadata(), **cues}
+            self._publish()
+            self._broadcast_now()
+            return
+        item = self._items[0]
+        artist, title = self._split_resource(str(item.get("resource") or ""))
+        queue = str(item.get("queue") or "autodj")
+        self._track_length = self._duration_for(item)
+        self._metadata = {
+            "artist": artist or str(item.get("cart") or item.get("category") or ""),
+            "title": title or "—",
+            "source": queue,
+            "kind": str(item.get("kind") or "musique"),
+            "status": "simulating",
+            "initial_uri": self._abs_media(item.get("path")),
+            "album": str(item.get("clock") or ""),
+            "editor": "demo",
+            "uptime": self.uptime(),
+            "on_air": self._on_air.isoformat(),
+            **cues,
+        }
+        self._publish()
+        self._broadcast_now()
+
+    def _publish(self) -> None:
+        from radiotomate.interface.live import normalize_live, set_live_snapshot
+
+        elapsed = (datetime.now() - self._on_air).total_seconds()
+        remaining = max(0.0, self._track_length - elapsed)
+        md = {
+            **self._metadata,
+            "uptime": self.uptime(),
+            "time": datetime.now().replace(microsecond=0).isoformat(),
+            "on_air": self._on_air.isoformat(),
+            "remaining": str(remaining),
+            "elapsed": str(elapsed),
+        }
+        self._metadata = md
+        set_live_snapshot(normalize_live(md))
+
+    async def _load_items(self, session, horizon_min: int = 30) -> None:
+        beets = BeetsIntegration.get()
+        data = await build_rundown(session, beets, horizon_min=horizon_min)
+        self._items = list(data.get("items") or [])
+        self._forecast = []
+        self._forecast_horizon = 0
+        self._rundown_meta = {
+            "horizon_min": data.get("horizon_min", horizon_min),
+            "clock": data.get("clock"),
+            "daypart": data.get("daypart"),
+        }
+
+    def _display_items(self, forecast: list[dict]) -> list[dict]:
+        live = list(self._items)
+        if not live:
+            return forecast
+        if forecast and forecast[0].get("resource") == live[0].get("resource"):
+            return forecast
+        last = str(live[-1].get("at") or "")
+        tail = [row for row in forecast if str(row.get("at") or "") > last]
+        return live + tail
+
+    def _archive_current(self) -> None:
+        if not self._items:
+            return
+        item = dict(self._items[0])
+        started = self._on_air.isoformat()
+        if self._played and self._played[-1].get("at") == started:
+            return
+        elapsed = max(1.0, (datetime.now() - self._on_air).total_seconds())
+        item["status"] = "joué"
+        item["status_code"] = "played"
+        item["at"] = started
+        item["duration"] = round(elapsed, 2)
+        self._played.append(item)
+        del self._played[:-12]
+
+    async def live_rundown(self, session, beets, horizon_min: int = 30) -> dict:
+        async with self._lock:
+            await self._bootstrap()
+            if self._forecast_horizon < horizon_min or not self._forecast:
+                data = await build_rundown(session, beets, horizon_min=horizon_min)
+                self._forecast = self._display_items(list(data.get("items") or []))
+                self._forecast_horizon = horizon_min
+                self._rundown_meta["horizon_min"] = horizon_min
+                if data.get("clock"):
+                    self._rundown_meta["clock"] = data.get("clock")
+                if data.get("daypart"):
+                    self._rundown_meta["daypart"] = data.get("daypart")
+            upcoming = list(self._forecast or self._items)
+            if upcoming:
+                current = dict(upcoming[0])
+                current["status"] = "à l'antenne"
+                current["status_code"] = "on_air"
+                upcoming[0] = current
+            items = [dict(row) for row in self._played] + upcoming
+            clock = self._rundown_meta.get("clock")
+            daypart = self._rundown_meta.get("daypart")
+            header = upcoming[0] if upcoming else (items[0] if items else None)
+            if header:
+                clock = header.get("clock") or clock
+                daypart = header.get("daypart") or daypart
+            return {
+                "now": now_paris().isoformat(),
+                "horizon_min": self._rundown_meta.get("horizon_min") or horizon_min,
+                "clock": clock,
+                "daypart": daypart,
+                "items": items,
+                "summary": rundown_summary(items),
+            }
+
+    async def _bootstrap(self) -> None:
+        if self._bootstrapped:
+            return
+        db = QuartAlchemy.get()
+        async with db.session() as session:
+            await self._load_items(session)
+        self._apply_current()
+        self._bootstrapped = True
 
     async def live(self) -> AsyncGenerator[dict, None]:
         while True:
-            elapsed = (datetime.now() - self._on_air).total_seconds()
-            remaining = self.TRACK_LENGTH - elapsed
-            if remaining < 0.0:
-                await self.skip()
-                remaining = 0.0
-            md = self._metadata
-            md["uptime"] = self.uptime()
-            md["time"] = datetime.now().replace(microsecond=0).isoformat()
-            md["remaining"] = str(remaining)
-            md["elapsed"] = str(elapsed)
+            async with self._lock:
+                await self._bootstrap()
+                elapsed = (datetime.now() - self._on_air).total_seconds()
+                remaining = self._track_length - elapsed
+                if remaining < 0.0:
+                    await self._skip_unlocked()
+                    elapsed = 0.0
+                    remaining = self._track_length
+                md = {
+                    **self._metadata,
+                    "uptime": self.uptime(),
+                    "time": datetime.now().replace(microsecond=0).isoformat(),
+                    "on_air": self._on_air.isoformat(),
+                    "remaining": str(max(0.0, remaining)),
+                    "elapsed": str(max(0.0, elapsed)),
+                }
+                self._metadata = md
             yield md
             try:
                 await or_shutdown(sleep(1))
@@ -212,65 +528,82 @@ class SchedulerDemo(Scheduler):
                 break
 
     async def skip(self):
+        async with self._lock:
+            await self._skip_unlocked()
+
+    async def _skip_unlocked(self):
+        self._archive_current()
         self._on_air = datetime.now().replace(microsecond=0)
-        self._metadata = self.generate_metadata()
+        self._override = None
+        db = QuartAlchemy.get()
+        async with db.session() as session:
+            await advance_sequencer_cursor(session)
+            if self._items:
+                self._items.pop(0)
+            if self._forecast:
+                self._forecast.pop(0)
+            if len(self._items) < 24:
+                await self._load_items(session, horizon_min=30)
+        self._apply_current()
 
-    def uptime(self) -> str:
-        uptime = datetime.now().replace(microsecond=0) - self._started_at
-        return str(uptime)
-
-    def generate_metadata(self) -> dict:
-        """
-        generates something different each call
-        """
-        sources = ["live", "autodj", "carts", "relay", "stream"]
-        albums = ["Radiotomate Rocks", "Better hygiene with Liquidsoap"]
-
-        self._i += 1
-        title = artistic_generator()
-        artist = artistic_generator()
-        album = albums[self._i % len(albums)]
-        filename = (
-            f"/home/radio/Music/{album}/"
-            + artist.replace(" ", "_")
-            + "-"
-            + title.replace(" ", "_")
-            + ".flac"
-        )
-        return {
+    async def _set_now_from_sound(self, cart: Cart, sound: Sound):
+        queue = cart.playout_queue()
+        kind = "jingle" if queue == "jingles" else "son"
+        duration = float(sound.duration or DEFAULT_CART_SEC)
+        raw = str(sound.title or "").strip()
+        if " - " in raw:
+            artist, title = (part.strip() for part in raw.split(" - ", 1))
+        else:
+            artist, title = cart.title, raw or cart.title
+        self._on_air = datetime.now().replace(microsecond=0)
+        self._track_length = duration if duration > 0 else DEFAULT_CART_SEC
+        self._override = {
             "artist": artist,
             "title": title,
-            "source": sources[self._i % len(sources)],
+            "source": queue,
+            "kind": kind,
             "status": "simulating",
-            "initial_uri": filename,
-            "album": album,
-            "editor": "Pytest",
-            "year": self._on_air.year - (self._i % 10),
-            "tracknumber": str(self._i % 8),
+            "initial_uri": self._abs_media(sound.path),
+            "album": cart.title,
+            "editor": "demo",
             "uptime": self.uptime(),
             "on_air": self._on_air.isoformat(),
-            "next_cart": {
-                "title": artistic_generator(),
-                "artist": "Cart démo",
-                "rid": 11,
-            },
-            "next_autodj": {
-                "title": artistic_generator(),
-                "artist": artistic_generator(),
-                "rid": 12,
-            },
-            "next_jingle": (
-                {"rid": -1}
-                if self._i % 3 == 0
-                else {"title": "Habillage", "artist": "NTR", "rid": 13}
-            ),
         }
+        self._apply_current()
 
     async def update_schedule(self, cart_id: int):
         _log.debug("Fake-update of schedule for cart %d", cart_id)
 
     async def push_cart(self, cart_id: int):
-        _log.debug("Fake-push cart %d now", cart_id)
+        db = QuartAlchemy.get()
+        async with db.session() as session:
+            cart = await Cart.from_id(session, cart_id, load_sounds=True)
+            if not cart:
+                raise RuntimeError(f"cart #{cart_id} not found")
+            try:
+                sound = cart.next_sound()
+            except IndexError:
+                sound = None
+            if sound is None and cart.sounds:
+                sound = cart.sounds[0]
+            if sound is None:
+                raise RuntimeError(f"cart #{cart_id} has no sound")
+            async with self._lock:
+                self._archive_current()
+                await self._set_now_from_sound(cart, sound)
+
+    async def push_sound(self, cart_id: int, sound_id: int):
+        db = QuartAlchemy.get()
+        async with db.session() as session:
+            cart = await Cart.from_id(session, cart_id, load_sounds=True)
+            if not cart:
+                raise RuntimeError(f"cart #{cart_id} not found")
+            sound = next((row for row in cart.sounds if row.id == sound_id), None)
+            if sound is None:
+                raise RuntimeError(f"sound #{sound_id} not in cart #{cart_id}")
+            async with self._lock:
+                self._archive_current()
+                await self._set_now_from_sound(cart, sound)
 
     async def queue_analysis(self, sound_ids: list[int]):
         _log.debug("Queueing sounds for analysis: %r", sound_ids)

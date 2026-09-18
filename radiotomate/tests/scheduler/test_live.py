@@ -1,15 +1,14 @@
+import asyncio
 import json
 from collections import Counter
-from datetime import datetime
 from unittest.mock import patch
 
 import httpx
 from quart.testing import QuartClient
 from sqlalchemy.orm import Session as ormSession
 
-from radiotomate.enums import ScheduleMode
 from radiotomate.interface.autodj import MultiDict, process_filters
-from radiotomate.models import AutoDJSlot, Cart, Sound
+from radiotomate.models import AutoDJSlot, Cart
 from radiotomate.quart import CustomQuart
 
 
@@ -22,7 +21,7 @@ async def test_live(client: QuartClient, auth: dict):
             "source": "unittests",
             "remaining": "176.2344",
             "elapsed": "3.212",
-            "time": datetime.now().isoformat(),
+            "time": "2026-09-14T00:30:00+02:00",
         }
 
         await client.post("/live", headers=auth, json=fake_md)
@@ -40,23 +39,19 @@ def fake_md() -> dict:
         "artist": "Bonnie Tester",
         "title": "Jingle bells",
         "source": "unittests",
-        "remaining": "176.2344",
+        "remaining": "0",
         "elapsed": "3.1415",
-        "time": datetime.now().isoformat(),
+        "time": "2026-09-14T00:30:00+02:00",
     }
 
 
 async def test_react_to_empty_jingle_queue(
     raw_app: CustomQuart,
     dbsession: ormSession,
-    fake_cart: Cart,
-    fake_sound: Sound,
+    jingles_ntr_cart: Cart,
     auth: dict,
 ):
-    "normal case: push a jingle"
-    fake_cart.schedule_mode = ScheduleMode.JINGLES
-    await dbsession.commit()
-
+    "normal case: clock motif pushes Jingles NTR"
     with patch(
         "httpx.AsyncClient.post",
         return_value=httpx.Response(200, json={"OK": 1}),
@@ -65,31 +60,34 @@ async def test_react_to_empty_jingle_queue(
             client = raw_app.test_client()
             metadata = fake_md()
             metadata["next_jingle"] = {"rid": -1}
+            metadata["next_autodj"] = {"rid": -1}
             result = await client.post("/live", headers=auth, json=metadata)
             result_text = (await result.data).decode()
             assert result.status_code == 200, "got non-OK response:" + result_text
-        mock_liquidsoap.assert_called_once_with(
-            "/queue/jingles",
-            json={
-                "path": str(fake_sound.path),
-                "artist": "",
-                "title": "",
-                "radiotomate_sound_id": fake_sound.id,
-                "rg_track_gain": str(str(fake_sound.gain)),
-            },
+            await asyncio.sleep(0.05)
+        queues = [c.args[0] for c in mock_liquidsoap.call_args_list]
+        assert "/queue/jingles" in queues
+        jingle = next(
+            c for c in mock_liquidsoap.call_args_list if c.args[0] == "/queue/jingles"
         )
+        assert jingle.kwargs["json"]["artist"] == "Jingles NTR"
 
 
 async def test_react_to_empty_jingle_queue_robust(
     raw_app: CustomQuart,
     dbsession: ormSession,
-    fake_cart: Cart,
-    fake_sound: Sound,
+    jingles_ntr_cart: Cart,
     auth: dict,
 ):
     "No jingle is enabled: should not crash"
-    fake_cart.schedule_mode = ScheduleMode.JINGLES
-    fake_sound.active = False
+    from sqlalchemy import select as sel
+
+    from radiotomate.models.sound import Sound as SoundModel
+
+    sound = await dbsession.scalar(
+        sel(SoundModel).filter(SoundModel.cart_id == jingles_ntr_cart.id)
+    )
+    sound.active = False
     await dbsession.commit()
 
     with patch(
@@ -100,17 +98,18 @@ async def test_react_to_empty_jingle_queue_robust(
             client = raw_app.test_client()
             metadata = fake_md()
             metadata["next_jingle"] = {"rid": -1}
+            metadata["next_autodj"] = {"rid": 1}
             result = await client.post("/live", headers=auth, json=metadata)
             result_text = (await result.data).decode()
             assert result.status_code == 200, "got non-OK response:" + result_text
+            await asyncio.sleep(0.05)
         mock_liquidsoap.assert_not_called()
 
 
 async def test_react_to_empty_jingle_queue_but_analyzing(
     raw_app: CustomQuart,
     dbsession: ormSession,
-    fake_cart: Cart,
-    fake_sound: Sound,
+    jingles_ntr_cart: Cart,
     auth: dict,
 ):
     """
@@ -119,26 +118,37 @@ async def test_react_to_empty_jingle_queue_but_analyzing(
     Be careful to unset gain after the application start. Otherwise the sound will be
     picked during background analyzer's start, as it tries to catch-up missed analysis.
     """
+    from sqlalchemy import update
+
+    from radiotomate.models.sound import Sound as SoundModel
+
     with patch(
         "httpx.AsyncClient.post",
         return_value=httpx.Response(200, json={"OK": 1}),
     ) as mock_liquidsoap:
         async with raw_app.test_app():
-            fake_cart.schedule_mode = ScheduleMode.JINGLES
-            fake_sound.gain = None
+            await asyncio.sleep(0.15)
+            await dbsession.execute(
+                update(SoundModel)
+                .where(SoundModel.cart_id == jingles_ntr_cart.id)
+                .values(gain=None)
+            )
             await dbsession.commit()
 
             client = raw_app.test_client()
             metadata = fake_md()
             metadata["next_jingle"] = {"rid": -1}
+            metadata["next_autodj"] = {"rid": 1}
             result = await client.post("/live", headers=auth, json=metadata)
             result_text = (await result.data).decode()
             assert result.status_code == 200, "got non-OK response:" + result_text
+            await asyncio.sleep(0.05)
         mock_liquidsoap.assert_not_called()
 
 
 async def test_react_to_empty_music_queue(
     raw_app: CustomQuart,
+    jingles_ntr_cart: Cart,
     auth: dict,
 ):
     with patch(
@@ -148,16 +158,20 @@ async def test_react_to_empty_music_queue(
         async with raw_app.test_app():
             client = raw_app.test_client()
             metadata = fake_md()
+            metadata["next_jingle"] = {"rid": -1}
             metadata["next_autodj"] = {"rid": -1}
             result = await client.post("/live", headers=auth, json=metadata)
             result_text = (await result.data).decode()
             assert result.status_code == 200, "got non-OK response:" + result_text
-        mock_liquidsoap.assert_called_once()
-        args, kwargs = mock_liquidsoap.call_args
-        assert args == ("/queue/autodj",)
-        assert "path" in kwargs["json"]
-        assert "beets_id" in kwargs["json"]
-        assert "rg_track_gain" in kwargs["json"]
+            await asyncio.sleep(0.05)
+        queues = [c.args[0] for c in mock_liquidsoap.call_args_list]
+        assert "/queue/autodj" in queues
+        autodj = next(
+            c for c in mock_liquidsoap.call_args_list if c.args[0] == "/queue/autodj"
+        )
+        assert "path" in autodj.kwargs["json"]
+        assert "beets_id" in autodj.kwargs["json"]
+        assert "rg_track_gain" in autodj.kwargs["json"]
 
 
 async def test_pick_filter(

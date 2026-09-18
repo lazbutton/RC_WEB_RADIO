@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session as ormSession
 
 from radiotomate.models import MetadataLog, Sound
 from radiotomate.quart import CustomQuart
+from radiotomate.scheduler.metrics import runtime_metrics
 
 
 async def test_metadata_log(
@@ -151,3 +152,59 @@ async def test_metadata_log_relay_headers(
             data=complete_md,
             headers=additional_headers,
         )
+
+
+async def test_metadata_log_retries_transient_failure(
+    raw_app: CustomQuart,
+    auth: dict,
+):
+    raw_app.config["RELAY_METADATA_TO"] = [{"url": "https://website.radio/hook"}]
+    raw_app.config["RELAY_METADATA_RETRY"] = {
+        "max_attempts": 3,
+        "timeout_seconds": 1,
+        "backoff_seconds": [0, 0],
+    }
+
+    with patch(
+        "httpx.AsyncClient.post",
+        side_effect=[
+            httpx.ConnectError("temporarily down"),
+            httpx.Response(503),
+            httpx.Response(204),
+        ],
+    ) as mock_relay:
+        async with raw_app.test_app():
+            result = await raw_app.test_client().post(
+                "/metadata_log",
+                json={"source": "retry-test"},
+                headers=auth,
+            )
+            assert result.status_code == 200
+
+    assert mock_relay.call_count == 3
+    assert runtime_metrics.metadata_relay_total == {
+        "retry": 2,
+        "success": 1,
+    }
+
+
+async def test_metadata_log_does_not_retry_client_error(
+    raw_app: CustomQuart,
+    auth: dict,
+):
+    raw_app.config["RELAY_METADATA_TO"] = [{"url": "https://website.radio/hook"}]
+
+    with patch(
+        "httpx.AsyncClient.post",
+        return_value=httpx.Response(400),
+    ) as mock_relay:
+        async with raw_app.test_app():
+            result = await raw_app.test_client().post(
+                "/metadata_log",
+                json={"source": "client-error"},
+                headers=auth,
+            )
+            assert result.status_code == 200
+
+    mock_relay.assert_called_once()
+    assert runtime_metrics.metadata_relay_total == {"failure": 1}
