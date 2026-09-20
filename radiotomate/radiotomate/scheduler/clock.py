@@ -55,6 +55,9 @@ SETTING_CLOCK_SEQ_CURSOR = "clock_seq_cursor"
 SETTING_CLOCK_SEQ_CLOCK_ID = "clock_seq_clock_id"
 SETTING_CLOCK_SEQ_EPOCH = "clock_seq_epoch"
 TARGET_QUEUE_DEPTH = 2
+# Une seule avance dans la file jingles : fallback Liquidsoap les joue
+# tant qu’il en reste, donc un stock de 2 bouche l’Auto-DJ.
+JINGLE_QUEUE_DEPTH = 1
 AUTODJ_BURST_REMAINING = 8.0
 AUTODJ_BURST_DEPTH = 3
 
@@ -134,7 +137,12 @@ def remaining_seconds(live_data: dict) -> float:
 
 
 def source_id(live_data: dict) -> str:
-    return str(live_data.get("source") or "")
+    raw = str(live_data.get("source") or "")
+    if raw in {"jingles", "carts", "stream", "autodj", "relay"}:
+        return raw
+    if raw.startswith("insert_initial") or raw.startswith("autodj"):
+        return "autodj"
+    return raw
 
 
 def anchor_in_daypart(slot_start: int, slot_end: int, hour: int, minute: int) -> bool:
@@ -454,7 +462,7 @@ async def tick(  # noqa: PLR0912, PLR0915
     for _ in range(8):
         pos = sequential[_state.cursor % len(sequential)]
         if pos.kind == PositionKind.JINGLE.value:
-            if jingles_q >= TARGET_QUEUE_DEPTH:
+            if jingles_q >= JINGLE_QUEUE_DEPTH:
                 if autodj_q >= autodj_target:
                     break
                 _state.cursor += 1
@@ -481,7 +489,7 @@ async def tick(  # noqa: PLR0912, PLR0915
             continue
         if pos.kind == PositionKind.MUSIQUE.value:
             if autodj_q >= autodj_target:
-                if jingles_q >= TARGET_QUEUE_DEPTH:
+                if jingles_q >= JINGLE_QUEUE_DEPTH:
                     break
                 _state.cursor += 1
                 continue
@@ -514,7 +522,7 @@ async def tick(  # noqa: PLR0912, PLR0915
             break
         if pos.kind in {PositionKind.SON.value, PositionKind.PUB.value}:
             if autodj_q >= autodj_target:
-                if jingles_q >= TARGET_QUEUE_DEPTH:
+                if jingles_q >= JINGLE_QUEUE_DEPTH:
                     break
                 _state.cursor += 1
                 continue

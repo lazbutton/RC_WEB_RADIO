@@ -140,6 +140,49 @@ async def test_autodj_fills_to_depth_two(
     client2.post.assert_not_called()
 
 
+async def test_does_not_stack_jingles_while_autodj_is_queued(
+    dbsession: ormSession,
+    jingles_cart: Cart,
+    beets_integration: BeetsIntegration,
+):
+    client = _client()
+    live = _live(
+        NIGHT,
+        source="autodj",
+        remaining="180",
+        next_jingle={"rid": 1},
+        next_autodj={"rid": 1},
+        jingles_queued=1,
+        autodj_queued=2,
+    )
+    assert await tick(dbsession, live, client, beets_integration) == []
+    client.post.assert_not_called()
+
+
+async def test_insert_initial_source_does_not_refill_jingles(
+    dbsession: ormSession,
+    jingles_cart: Cart,
+    beets_integration: BeetsIntegration,
+):
+    client = _client()
+    actions = await tick(
+        dbsession,
+        _live(
+            NIGHT,
+            source="insert_initial_track_mark.6",
+            remaining="180",
+            next_jingle={"rid": -1},
+            next_autodj={"rid": 1},
+            jingles_queued=0,
+            autodj_queued=2,
+        ),
+        client,
+        beets_integration,
+    )
+    assert "jingle" not in actions
+    client.post.assert_not_called()
+
+
 async def test_autodj_fills_while_cart_is_on_air(
     dbsession: ormSession,
     jingles_cart: Cart,

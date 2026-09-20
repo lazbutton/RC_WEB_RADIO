@@ -238,16 +238,23 @@ programs = fallback([stream,   relay,     carts,        autodj,        blank()],
   replay_metadata=false,
   id="programs")
 
-def update_current_source_id(_, b)
-  current_source_id := source.id(b)
-  if current_source_id() == "programs" then
-    current_source_id := current_programs_source()
+def mark_jingles_on_air(_, b)
+  current_source_id := "jingles"
+  b
+end
+
+def mark_programs_on_air(_, b)
+  sid = current_programs_source()
+  if sid == "programs" or sid == "starting" then
+    current_source_id := "autodj"
+  else
+    current_source_id := sid
   end
   b
 end
 
 programs_and_jingles = fallback([jingles, programs],
-  transitions=[update_current_source_id, update_current_source_id],
+  transitions=[mark_jingles_on_air, mark_programs_on_air],
   id="programs_and_jingles",
   replay_metadata=false
 )
@@ -281,12 +288,19 @@ def finite_seconds(x) =
 end
 
 def track_remaining() =
-  r1 = finite_seconds(programs_and_jingles.remaining())
-  r2 = finite_seconds(programs.remaining())
-  r3 = finite_seconds(autodj.remaining())
-  r4 = finite_seconds(autodj_queue.remaining())
-  r5 = finite_seconds(bed.remaining())
-  max(r1, max(r2, max(r3, max(r4, r5))))
+  sid = current_source_id()
+  if sid == "jingles" then
+    finite_seconds(jingles.remaining())
+  elsif sid == "carts" then
+    finite_seconds(carts.remaining())
+  elsif sid == "stream" then
+    finite_seconds(stream.remaining())
+  elsif sid == "relay" then
+    finite_seconds(relay.remaining())
+  else
+    r = finite_seconds(autodj.remaining())
+    if r > 0. then r else finite_seconds(programs_and_jingles.remaining()) end
+  end
 end
 
 def effective_gain() =
