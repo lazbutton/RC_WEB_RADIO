@@ -44,7 +44,7 @@ def test_normalize_live_ignores_initial_track_mark():
             "carts_queued": "1",
         }
     )
-    assert payload["source"] == ""
+    assert payload["source"] == "autodj"
     assert payload["jingles_queued"] == 2
     assert payload["autodj_queued"] == 3
     assert payload["carts_queued"] == 1

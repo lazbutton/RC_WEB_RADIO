@@ -138,11 +138,11 @@ def remaining_seconds(live_data: dict) -> float:
 
 def source_id(live_data: dict) -> str:
     raw = str(live_data.get("source") or "")
-    if raw in {"jingles", "carts", "stream", "autodj", "relay"}:
+    if raw in {"jingles", "carts", "stream", "relay"}:
         return raw
-    if raw.startswith("insert_initial") or raw.startswith("autodj"):
-        return "autodj"
-    return raw
+    # Auto-DJ, files d’attente internes LS (`insert_initial*`,
+    # `replay_metadata`, `programs`, …) : ne pas relancer les jingles.
+    return "autodj"
 
 
 def anchor_in_daypart(slot_start: int, slot_end: int, hour: int, minute: int) -> bool:

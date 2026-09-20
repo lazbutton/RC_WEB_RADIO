@@ -78,8 +78,13 @@ def normalize_live(md: dict) -> dict:
     raw_status = str(md.get("status") or "")
     status = "simulating" if raw_status == "simulating" else "playing"
     source = str(md.get("source") or "")
-    if "insert_initial_track_mark" in source.lower():
-        source = ""
+    lowered = source.lower()
+    if (
+        "insert_initial_track_mark" in lowered
+        or lowered in {"replay_metadata", "programs", "starting", "blank"}
+        or lowered.startswith("autodj")
+    ):
+        source = "autodj"
     return {
         "status": status,
         "source": source,

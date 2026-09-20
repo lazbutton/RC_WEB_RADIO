@@ -159,6 +159,30 @@ async def test_does_not_stack_jingles_while_autodj_is_queued(
     client.post.assert_not_called()
 
 
+async def test_replay_metadata_source_does_not_refill_jingles(
+    dbsession: ormSession,
+    jingles_cart: Cart,
+    beets_integration: BeetsIntegration,
+):
+    client = _client()
+    actions = await tick(
+        dbsession,
+        _live(
+            NIGHT,
+            source="replay_metadata",
+            remaining="180",
+            next_jingle={"rid": -1},
+            next_autodj={"rid": 1},
+            jingles_queued=0,
+            autodj_queued=2,
+        ),
+        client,
+        beets_integration,
+    )
+    assert "jingle" not in actions
+    client.post.assert_not_called()
+
+
 async def test_insert_initial_source_does_not_refill_jingles(
     dbsession: ormSession,
     jingles_cart: Cart,

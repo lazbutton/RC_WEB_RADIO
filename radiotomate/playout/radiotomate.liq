@@ -211,6 +211,14 @@ current_source_id = ref("starting")
 # Skipping avoids getting back in the middle of a music track after a cart,
 # but it requires a weird implementation. See https://github.com/savonet/liquidsoap/issues/1548
 # also transitions are currently broken in LS 2.3 :/   https://github.com/savonet/liquidsoap/issues/4179
+def normalize_programs_source(sid)
+  if sid == "carts" or sid == "stream" or sid == "relay" then
+    sid
+  else
+    "autodj"
+  end
+end
+
 def crossfade_3s(a,b)
   # faded = add(normalize=false, [
   #   fade.in(duration=3., type="exp", b),
@@ -218,7 +226,7 @@ def crossfade_3s(a,b)
   # ])
   # thread.run(delay=10., { source.skip(a) })
 
-  current_programs_source := source.id(b)
+  current_programs_source := normalize_programs_source(source.id(b))
   current_source_id := current_programs_source()
 
   # if an input stream is on air, stop downloading from the relay
@@ -244,12 +252,7 @@ def mark_jingles_on_air(_, b)
 end
 
 def mark_programs_on_air(_, b)
-  sid = current_programs_source()
-  if sid == "programs" or sid == "starting" then
-    current_source_id := "autodj"
-  else
-    current_source_id := sid
-  end
+  current_source_id := normalize_programs_source(current_programs_source())
   b
 end
 
