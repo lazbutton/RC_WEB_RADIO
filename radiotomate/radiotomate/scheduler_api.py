@@ -29,7 +29,7 @@ from radiotomate.scheduler.clock import (
     advance_sequencer_cursor,
     now_paris,
 )
-from radiotomate.scheduler.execution import published_rundown
+from radiotomate.scheduler.execution import preview_rundown
 from radiotomate.scheduler.rundown import (
     DEFAULT_CART_SEC,
     DEFAULT_MUSIC_SEC,
@@ -93,8 +93,19 @@ class Scheduler:
     async def skip(self):
         await self.client.delete("/live")
 
-    async def live_rundown(self, session, beets, horizon_min: int = 30) -> dict:
-        return await published_rundown(session, beets, horizon_min=horizon_min)
+    async def live_rundown(
+        self,
+        session,
+        beets,
+        horizon_min: int = 30,
+        *,
+        force: bool = False,
+    ) -> dict:
+        _ = force
+        return await preview_rundown(session, beets, horizon_min=horizon_min)
+
+    def discard_forecast(self) -> None:
+        return
 
     async def live(self) -> AsyncGenerator[dict, None]:
         sleeptime = 10
@@ -159,6 +170,28 @@ class Scheduler:
                 "Error while pushing sound %d of cart %d: %s %s",
                 sound_id,
                 cart_id,
+                result.status_code,
+                result.text,
+            )
+            raise RuntimeError(result.text or f"HTTP {result.status_code}")
+
+    async def push_path(
+        self,
+        path: str,
+        *,
+        artist: str = "",
+        title: str = "",
+        kind: str = "son",
+    ):
+        _log.debug("Pushing bank path now: %s", path)
+        result = await self.client.post(
+            "/schedule/path/now",
+            json={"path": path, "artist": artist, "title": title, "kind": kind},
+        )
+        if result.status_code != 200:
+            _log.error(
+                "Error while pushing path %s: %s %s",
+                path,
                 result.status_code,
                 result.text,
             )
@@ -333,7 +366,7 @@ class SchedulerDemo(Scheduler):
             "duration": self._track_length,
             "started_at": started.isoformat(),
             "source": self._metadata.get("source") or "autodj",
-            "SOURCE_NAME": "new-trad-radio",
+            "SOURCE_NAME": "button",
             "path": self._metadata.get("initial_uri") or "",
             "on_air": self._on_air.isoformat(),
         }
@@ -341,6 +374,12 @@ class SchedulerDemo(Scheduler):
         if key == self._last_broadcast:
             return
         self._last_broadcast = key
+        from radiotomate.services.emissions import cached_on_air_override
+
+        override = cached_on_air_override()
+        if override:
+            body["title"] = override.get("title") or body["title"]
+            body["artist"] = override.get("artist") or body["artist"]
         if self._cue_path is not None:
             try:
                 self._cue_path.parent.mkdir(parents=True, exist_ok=True)
@@ -459,9 +498,23 @@ class SchedulerDemo(Scheduler):
         self._played.append(item)
         del self._played[:-12]
 
-    async def live_rundown(self, session, beets, horizon_min: int = 30) -> dict:
+    def discard_forecast(self) -> None:
+        self._forecast = []
+        self._forecast_horizon = 0
+
+    async def live_rundown(
+        self,
+        session,
+        beets,
+        horizon_min: int = 30,
+        *,
+        force: bool = False,
+    ) -> dict:
         async with self._lock:
             await self._bootstrap()
+            if force:
+                self._forecast = []
+                self._forecast_horizon = 0
             if self._forecast_horizon < horizon_min or not self._forecast:
                 data = await build_rundown(session, beets, horizon_min=horizon_min)
                 self._forecast = self._display_items(list(data.get("items") or []))
@@ -571,6 +624,37 @@ class SchedulerDemo(Scheduler):
         }
         self._apply_current()
 
+    def _set_now_from_path(
+        self,
+        path: str,
+        *,
+        artist: str,
+        title: str,
+        kind: str,
+    ):
+        if kind == "jingle":
+            queue = "jingles"
+        elif kind == "musique":
+            queue = "autodj"
+        else:
+            queue = "carts"
+        duration = DEFAULT_CART_SEC if kind != "musique" else DEFAULT_MUSIC_SEC
+        self._on_air = datetime.now().replace(microsecond=0)
+        self._track_length = duration
+        self._override = {
+            "artist": artist,
+            "title": title or path.rsplit("/", 1)[-1],
+            "source": queue,
+            "kind": kind if kind in {"musique", "jingle", "son", "pub"} else "son",
+            "status": "simulating",
+            "initial_uri": self._abs_media(path),
+            "album": "",
+            "editor": "demo",
+            "uptime": self.uptime(),
+            "on_air": self._on_air.isoformat(),
+        }
+        self._apply_current()
+
     async def update_schedule(self, cart_id: int):
         _log.debug("Fake-update of schedule for cart %d", cart_id)
 
@@ -604,6 +688,18 @@ class SchedulerDemo(Scheduler):
             async with self._lock:
                 self._archive_current()
                 await self._set_now_from_sound(cart, sound)
+
+    async def push_path(
+        self,
+        path: str,
+        *,
+        artist: str = "",
+        title: str = "",
+        kind: str = "son",
+    ):
+        async with self._lock:
+            self._archive_current()
+            self._set_now_from_path(path, artist=artist, title=title, kind=kind)
 
     async def queue_analysis(self, sound_ids: list[int]):
         _log.debug("Queueing sounds for analysis: %r", sound_ids)

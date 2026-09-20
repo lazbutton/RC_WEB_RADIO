@@ -5,7 +5,7 @@
 <section class="content">
 <div class="container">
 <h1>Conducteur</h1>
-<p class="ntr-help">
+<p class="suite-help">
     Horloge <strong>{{ clock }}</strong>
     · daypart <strong>{{ daypart }}</strong>
     · à partir de {{ now_label }}
@@ -22,6 +22,7 @@
         <tr>
             <th>Heure</th>
             <th>Type</th>
+            <th>Cart</th>
             <th>Ressource</th>
             <th>Quand</th>
         </tr>
@@ -31,10 +32,14 @@
         <tr>
             <td>{{ item.at_label }}</td>
             <td>{{ item.kind }}</td>
+            <td>{{ item.cart or "—" }}</td>
             <td>
                 {{ item.resource }}
                 {% if item.status == 'secours' %}
                     <span class="tag is-warning">secours</span>
+                {% endif %}
+                {% if item.status == 'manquant' %}
+                    <span class="tag is-danger">manquant</span>
                 {% endif %}
             </td>
             <td>{{ item.when_label }}</td>
@@ -43,10 +48,10 @@
     </tbody>
 </table>
 {% else %}
-<p class="ntr-help">Aucun item prévu pour cette fenêtre.</p>
+<p class="suite-help">Aucun item prévu pour cette fenêtre.</p>
 {% endif %}
 
-<p class="ntr-help">
+<p class="suite-help">
     Prévisionnel d’horloge auto-DJ (pas le conducteur station live / relais).
     Recalculé à chaque ouverture, sans pousser Liquidsoap.
 </p>

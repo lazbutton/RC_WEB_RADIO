@@ -1,0 +1,9 @@
+// Overlay also shipped as static/suite.css so --demo picks it up without a Sass rebuild.
+// Keep tokens in sync with radiotomate/static/suite.css.
+
+:root {
+  --suite-bg: #0a0a0a;
+  --suite-surface: #121212;
+  --suite-paper: #f5f5f5;
+  --suite-earth: #f5f5f5;
+}

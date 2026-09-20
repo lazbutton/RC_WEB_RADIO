@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 from apscheduler import CoalescePolicy, ScheduleLookupError
 from apscheduler.triggers.date import DateTrigger
-from quart import Blueprint, current_app, g
+from quart import Blueprint, current_app, g, request
 from sqlalchemy.orm import Session as ormSession
 from werkzeug.exceptions import BadRequest
 
@@ -52,7 +52,7 @@ async def push_cart(session: ormSession, current_app, cart_id: int):
     if cart.mode == CartMode.RELAY:
         await _push_cart_relay(cart, gateway, current_app)
     else:
-        await _push_cart_sound(cart, gateway, current_app)
+        await _push_cart_sound(cart, gateway, current_app, session)
 
 
 async def push_named_sound(
@@ -69,15 +69,59 @@ async def push_named_sound(
         _log.warning("Sound #%d not in cart #%d", sound_id, cart_id)
         return False
     await _enqueue_sound(cart, sound, gateway, current_app)
+    await session.commit()
     return True
 
 
-async def _push_cart_sound(cart: Cart, gateway: PlayoutGateway, current_app):
-    sound = cart.next_sound()
-    if sound:
-        await _enqueue_sound(cart, sound, gateway, current_app)
+async def push_bank_path(  # noqa: PLR0913
+    session: ormSession,
+    current_app,
+    path: str,
+    *,
+    artist: str,
+    title: str,
+    kind: str = "son",
+) -> bool:
+    _ = session
+    gateway = gateway_for(current_app.config["PLAYOUT_CLIENT"])
+    if kind == "jingle":
+        queue = "jingles"
+    elif kind == "musique":
+        queue = "autodj"
     else:
+        queue = "carts"
+    result = await gateway.queue(
+        queue,
+        {
+            "path": path,
+            "artist": artist,
+            "title": title,
+        },
+    )
+    if result.ok:
+        _log.info("Pushed bank path %s on %s as RID %s", path, queue, result.payload)
+        return True
+    _log.error("Error while pushing bank path %s: %s", path, result.error)
+    return False
+
+
+async def _push_cart_sound(
+    cart: Cart,
+    gateway: PlayoutGateway,
+    current_app,
+    session: ormSession,
+):
+    pushed = 0
+    for _ in range(2):
+        sound = cart.next_sound()
+        if not sound:
+            break
+        await _enqueue_sound(cart, sound, gateway, current_app)
+        pushed += 1
+    if not pushed:
         _log.warning("Scheduled cart %d:%s has no next sound", cart.id, cart.title)
+        return
+    await session.commit()
 
 
 async def _enqueue_sound(
@@ -105,6 +149,11 @@ async def _enqueue_sound(
             sound.path,
             result.payload,
         )
+        sound.last_played = datetime.now()
+        if queue == "carts":
+            from radiotomate.scheduler.clock import note_carts_push
+
+            note_carts_push(cart.id)
         if cart.max_duration:
             await current_app.scheduler.remove_schedule(str(-cart.id))
             when = datetime.now() + timedelta(seconds=cart.max_duration)
@@ -231,4 +280,26 @@ async def push_sound_now(cart_id: str, sound_id: str):
     ok = await push_named_sound(g.dbsession, current_app, cid, sid)
     if not ok:
         return "cart or sound not found", 404
+    return "", 200
+
+
+@blueprint.post("/schedule/path/now")
+@token_required
+async def push_path_now():
+    data = await request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise BadRequest("JSON object required")
+    path = str(data.get("path") or "").strip()
+    if not path:
+        raise BadRequest("path required")
+    ok = await push_bank_path(
+        g.dbsession,
+        current_app,
+        path,
+        artist=str(data.get("artist") or ""),
+        title=str(data.get("title") or ""),
+        kind=str(data.get("kind") or "son"),
+    )
+    if not ok:
+        return "playout rejected path", 502
     return "", 200

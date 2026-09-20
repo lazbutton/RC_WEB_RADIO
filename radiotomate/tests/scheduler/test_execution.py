@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as ormSession
 
 from radiotomate.beets import BeetsIntegration
-from radiotomate.domain.execution import rundown_summary
+from radiotomate.domain.execution import item_status_code, rundown_summary
 from radiotomate.enums import CommandStatus
 from radiotomate.models import (
     Clock,
@@ -56,9 +56,13 @@ def test_rundown_summary_counts_upcoming_rescue_and_skip():
     assert summary["next_anchor"]["resource"] == "Pub locale"
 
 
+def test_item_status_code_maps_manquant():
+    assert item_status_code({"status": "manquant"}) == "failed"
+
+
 async def test_clock_accepts_cart_id(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
 ):
     from radiotomate.services.autodj import create_clock
@@ -67,18 +71,18 @@ async def test_clock_accepts_cart_id(
         dbsession,
         {
             "name": "IDs stables",
-            "fallback_cart_id": jingles_ntr_cart.id,
+            "fallback_cart_id": jingles_cart.id,
             "motif": [
                 {
                     "kind": "jingle",
-                    "cart_id": jingles_ntr_cart.id,
+                    "cart_id": jingles_cart.id,
                 }
             ],
             "anchors": [
                 {
                     "kind": "pub",
                     "cart_id": pubs_cart.id,
-                    "fallback_cart_id": jingles_ntr_cart.id,
+                    "fallback_cart_id": jingles_cart.id,
                     "minute": 15,
                     "sync": "molle",
                 }
@@ -87,38 +91,38 @@ async def test_clock_accepts_cart_id(
     )
     await dbsession.commit()
     loaded = await Clock.from_id(dbsession, clock.id)
-    assert loaded.fallback_cart_id == jingles_ntr_cart.id
-    assert loaded.fallback_cart_title == "Jingles NTR"
-    assert loaded.positions[0].cart_id == jingles_ntr_cart.id
+    assert loaded.fallback_cart_id == jingles_cart.id
+    assert loaded.fallback_cart_title == "Jingles"
+    assert loaded.positions[0].cart_id == jingles_cart.id
     assert loaded.anchored_positions()[0].cart_id == pubs_cart.id
     assert loaded.anchored_positions()[0].is_soft_sync is True
 
 
 async def test_rename_cart_updates_clock_titles(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
 ):
     clock = await Clock.from_name(dbsession, "24/24 Rotation habillée")
     clock = await Clock.from_id(dbsession, clock.id)
-    clock.fallback_cart_id = jingles_ntr_cart.id
-    clock.fallback_cart_title = jingles_ntr_cart.title
+    clock.fallback_cart_id = jingles_cart.id
+    clock.fallback_cart_title = jingles_cart.title
     for pos in clock.positions:
-        if pos.cart_title == jingles_ntr_cart.title or pos.kind == "jingle":
-            pos.cart_id = jingles_ntr_cart.id
-            pos.cart_title = jingles_ntr_cart.title
+        if pos.cart_title == jingles_cart.title or pos.kind == "jingle":
+            pos.cart_id = jingles_cart.id
+            pos.cart_title = jingles_cart.title
     await dbsession.commit()
-    jingles_ntr_cart.title = "Jingles NTR renommés"
-    await sync_cart_display_titles(dbsession, jingles_ntr_cart)
+    jingles_cart.title = "Jingles renommés"
+    await sync_cart_display_titles(dbsession, jingles_cart)
     await dbsession.commit()
     clock = await Clock.from_id(dbsession, clock.id)
-    assert clock.fallback_cart_title == "Jingles NTR renommés"
-    jingle = next(pos for pos in clock.positions if pos.cart_id == jingles_ntr_cart.id)
-    assert jingle.cart_title == "Jingles NTR renommés"
+    assert clock.fallback_cart_title == "Jingles renommés"
+    jingle = next(pos for pos in clock.positions if pos.cart_id == jingles_cart.id)
+    assert jingle.cart_title == "Jingles renommés"
 
 
 async def test_materialize_rundown_persists_items(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
     beets_integration: BeetsIntegration,
 ):
@@ -138,7 +142,7 @@ async def test_materialize_rundown_persists_items(
 
 async def test_published_rundown_is_stable_source(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
     beets_integration: BeetsIntegration,
 ):
@@ -160,17 +164,20 @@ async def test_published_rundown_is_stable_source(
 
 async def test_tick_records_commands_and_survives_restart(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
     beets_integration: BeetsIntegration,
 ):
     client = _client()
-    actions = await tick(
-        dbsession,
-        _live(JOURNEE_20, next_jingle={"rid": 1}, next_autodj={"rid": 1}),
-        client,
-        beets_integration,
+    live = _live(
+        JOURNEE_20,
+        remaining="180",
+        next_jingle={"rid": 1},
+        next_autodj={"rid": 1},
+        jingles_queued=2,
+        autodj_queued=3,
     )
+    actions = await tick(dbsession, live, client, beets_integration)
     assert "anchor:20" in actions
     commands = list(await dbsession.scalars(select(PlayoutCommand)))
     assert commands
@@ -181,12 +188,7 @@ async def test_tick_records_commands_and_survives_restart(
 
     reset_state()
     client2 = _client()
-    again = await tick(
-        dbsession,
-        _live(JOURNEE_20, next_jingle={"rid": 1}, next_autodj={"rid": 1}),
-        client2,
-        beets_integration,
-    )
+    again = await tick(dbsession, live, client2, beets_integration)
     assert "anchor:20" not in again
     client2.post.assert_not_called()
     stored = await Setting.from_key(dbsession, SETTING_FIRED_ANCHORS)
@@ -196,7 +198,7 @@ async def test_tick_records_commands_and_survives_restart(
 
 async def test_outbox_does_not_resend_acknowledged(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
 ):
     from radiotomate.scheduler.execution import record_live_item
 
@@ -207,7 +209,7 @@ async def test_outbox_does_not_resend_acknowledged(
             "kind": "jingle",
             "when": "sequential",
             "queue": "jingles",
-            "resource": "ID NTR",
+            "resource": "ID BUTTON",
             "path": "/tmp/id.mp3",
             "duration": 8,
         },
@@ -255,7 +257,7 @@ async def test_playout_gateway_retries_transient():
 
 async def test_soft_sync_waits_then_fires_without_skip(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
     beets_integration: BeetsIntegration,
 ):
@@ -275,6 +277,8 @@ async def test_soft_sync_waits_then_fires_without_skip(
             remaining="12",
             next_jingle={"rid": 1},
             next_autodj={"rid": 1},
+            jingles_queued=2,
+            autodj_queued=3,
         ),
         client,
         beets_integration,
@@ -290,6 +294,8 @@ async def test_soft_sync_waits_then_fires_without_skip(
             remaining="1",
             next_jingle={"rid": 1},
             next_autodj={"rid": 1},
+            jingles_queued=2,
+            autodj_queued=3,
         ),
         client,
         beets_integration,
@@ -301,7 +307,7 @@ async def test_soft_sync_waits_then_fires_without_skip(
 
 async def test_soft_anchor_glides_in_rundown(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
     beets_integration: BeetsIntegration,
 ):
@@ -330,7 +336,7 @@ async def test_soft_anchor_glides_in_rundown(
 
 async def test_as_run_links_rundown_item(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     beets_integration: BeetsIntegration,
 ):
     from radiotomate.scheduler.execution import reconcile_as_run

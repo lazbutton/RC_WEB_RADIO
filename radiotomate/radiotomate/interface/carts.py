@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import json
 import logging
@@ -19,11 +20,13 @@ from quart import (
     url_for,
 )
 from quart_auth import Unauthorized
+from sqlalchemy import select
 from werkzeug.exceptions import BadRequest, Conflict, NotFound
 
 from radiotomate.auth import current_user, login_required, permission_required
 from radiotomate.enums import CartMode, DayNames, ScheduleMode
 from radiotomate.interface import safe_int, safe_path, stream_form
+from radiotomate.interface.autodj import invalidate_conducteur_cache
 from radiotomate.interface.json_util import forbidden_unless, read_json_object
 from radiotomate.interface.spa import console_dist
 from radiotomate.models import Cart, Sound
@@ -40,9 +43,38 @@ _log = logging.getLogger(__name__)
 
 blueprint = Blueprint("carts", __name__, template_folder="templates")
 
+AUDIO_SUFFIXES = {
+    ".mp3",
+    ".wav",
+    ".wave",
+    ".flac",
+    ".ogg",
+    ".oga",
+    ".opus",
+    ".m4a",
+    ".aac",
+    ".aiff",
+    ".aif",
+    ".wma",
+    ".mp2",
+    ".webm",
+}
+BANK_TOPS = ("30-habillage", "40-emissions")
+MAX_BANK_ATTACH = 2000
+_cart_rank_locks: dict[int, asyncio.Lock] = {}
+_cart_rank_locks_guard = asyncio.Lock()
+
 
 def media_root() -> Path:
     return Path(os.environ.get("MEDIA_ROOT", "/media")).resolve()
+
+
+def _assert_bank_top(rel: str) -> None:
+    top = rel.split("/", 1)[0]
+    if top in {"00-inbox", "90-trash"}:
+        raise BadRequest("inbox/trash cannot be attached to a cart")
+    if top not in BANK_TOPS:
+        raise BadRequest("rotation and archives belong to auto-DJ, not carts")
 
 
 def path_in_media_bank(path: Path) -> bool:
@@ -71,12 +103,112 @@ def resolve_bank_path(raw: str) -> Path:
     if root not in resolved.parents and resolved != root:
         raise BadRequest("path is outside the media bank")
     rel = resolved.relative_to(root).as_posix()
-    top = rel.split("/", 1)[0]
-    if top in {"00-inbox", "90-trash"}:
-        raise BadRequest("inbox/trash cannot be attached to a cart")
+    _assert_bank_top(rel)
     if not resolved.is_file():
         raise BadRequest(f"missing file: {rel}")
     return resolved
+
+
+def resolve_bank_dir(raw: str) -> Path:
+    root = media_root()
+    candidate = Path(raw)
+    path = candidate if candidate.is_absolute() else (root / candidate)
+    resolved = path.resolve()
+    if root not in resolved.parents and resolved != root:
+        raise BadRequest("path is outside the media bank")
+    if resolved == root:
+        raise BadRequest("pick a media folder")
+    rel = resolved.relative_to(root).as_posix()
+    _assert_bank_top(rel)
+    if not resolved.is_dir():
+        raise BadRequest(f"missing folder: {rel}")
+    return resolved
+
+
+def iter_bank_audio(folder: Path) -> list[Path]:
+    files = [
+        path
+        for path in sorted(folder.rglob("*"))
+        if path.is_file()
+        and not path.name.startswith(".")
+        and path.suffix.lower() in AUDIO_SUFFIXES
+    ]
+    if len(files) > MAX_BANK_ATTACH:
+        raise BadRequest(f"folder has more than {MAX_BANK_ATTACH} audio files")
+    return files
+
+
+def collect_bank_uploads(raws: list) -> list[dict]:
+    seen: set[Path] = set()
+    uploads: list[dict] = []
+    for raw in raws:
+        folder = resolve_bank_dir(str(raw))
+        for path in iter_bank_audio(folder):
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            uploads.append({"uploaded_to": path, "filename": path.name})
+    if len(uploads) > MAX_BANK_ATTACH:
+        raise BadRequest(f"folder has more than {MAX_BANK_ATTACH} audio files")
+    return uploads
+
+
+def list_bank_folders(root: Path) -> list[dict]:
+    folders: list[dict] = []
+    for top in BANK_TOPS:
+        base = root / top
+        if not base.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = sorted(name for name in dirnames if not name.startswith("."))
+            count = sum(
+                1
+                for name in filenames
+                if not name.startswith(".")
+                and Path(name).suffix.lower() in AUDIO_SUFFIXES
+            )
+            if not count:
+                continue
+            rel = Path(dirpath).resolve().relative_to(root).as_posix()
+            folders.append({"path": rel, "count": count})
+            if len(folders) >= 200:
+                return folders
+    return folders
+
+
+def _looks_like_audio(head: bytes) -> bool:
+    if len(head) < 12:
+        return False
+    if head.startswith((b"ID3", b"OggS", b"fLaC")):
+        return True
+    if head.startswith(b"RIFF") and head[8:12] == b"WAVE":
+        return True
+    if head.startswith(b"FORM") and head[8:12] in {b"AIFF", b"AIFC"}:
+        return True
+    if head[4:8] == b"ftyp":
+        return True
+    return head[0] == 0xFF and (head[1] & 0xE0) == 0xE0
+
+
+def _inspect_audio(path: Path) -> float | None:
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(64)
+    except OSError:
+        return None
+    if not _looks_like_audio(head):
+        return None
+    return _audio_length(path)
+
+
+async def _lock_for_cart(cart_id: int) -> asyncio.Lock:
+    async with _cart_rank_locks_guard:
+        lock = _cart_rank_locks.get(cart_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _cart_rank_locks[cart_id] = lock
+        return lock
 
 
 async def render_macro(macro, **kwargs) -> str:
@@ -192,9 +324,8 @@ def _enum_from_json(enum_cls, raw, label: str):
 
 
 def _sound_json(sound: Sound) -> dict:
-    uploader = None
-    if getattr(sound, "uploader", None) is not None:
-        uploader = sound.uploader.username
+    loaded = sound.__dict__.get("uploader")
+    uploader = loaded.username if loaded is not None else None
     return {
         "id": sound.id,
         "rank": sound.rank,
@@ -217,10 +348,14 @@ def _cart_queue(cart: Cart) -> str | None:
     return "carts"
 
 
-def _cart_json(cart: Cart) -> dict:
+def _cart_json(cart: Cart, sounds: list[Sound] | None = None) -> dict:
+    listed = cart.sounds if sounds is None else sounds
     nxt = None
     if cart.mode is not CartMode.RELAY:
-        nxt = cart.next_sound(for_display=True)
+        if sounds is None:
+            nxt = cart.next_sound(for_display=True)
+        else:
+            nxt = next((sound for sound in listed if sound.available), None)
     return {
         "id": cart.id,
         "version": cart.version,
@@ -244,14 +379,84 @@ def _cart_json(cart: Cart) -> dict:
         "schedule_minute": cart.schedule_minute,
         "schedule_second": cart.schedule_second,
         "next_sound_id": nxt.id if nxt else None,
-        "sounds": [_sound_json(sound) for sound in cart.sounds],
+        "sounds": [_sound_json(sound) for sound in listed],
     }
 
 
-async def _load_cart_json(cart_id: int) -> Cart | None:
+async def _load_cart_json(cart_id: int, *, uploaders: bool = False) -> Cart | None:
     return await Cart.from_id(
-        g.dbsession, cart_id, load_sounds=True, load_uploaders=True
+        g.dbsession, cart_id, load_sounds=True, load_uploaders=uploaders
     )
+
+
+def _audio_length(path: Path) -> float | None:
+    try:
+        metadata = mutagen.File(path)
+    except Exception:
+        return None
+    length = getattr(getattr(metadata, "info", None), "length", None)
+    if length is None:
+        return None
+    return float(length)
+
+
+async def _ingest_json_uploads(cart_id: int, uploads: list) -> list[Sound]:
+    """Keep audio files; skip junk from a dropped folder (.DS_Store, images…)."""
+    added: list[Sound] = []
+    limit = asyncio.Semaphore(8)
+
+    async def _probe(path: Path) -> float | None:
+        async with limit:
+            return await asyncio.to_thread(_inspect_audio, path)
+
+    lengths = await asyncio.gather(*[_probe(item["uploaded_to"]) for item in uploads])
+    lock = await _lock_for_cart(cart_id)
+    async with lock:
+        already = {
+            Path(path).resolve()
+            for path in await g.dbsession.scalars(
+                select(Sound.path).where(Sound.cart_id == cart_id)
+            )
+            if path
+        }
+        rank = await Sound.next_rank(g.dbsession, cart_id)
+        for uploaded_file, length in zip(uploads, lengths, strict=True):
+            path = uploaded_file["uploaded_to"]
+            resolved = path.resolve()
+            if resolved in already:
+                continue
+            if length is None:
+                with contextlib.suppress(OSError):
+                    unlink_cart_file(path)
+                continue
+            already.add(resolved)
+            sound = Sound(
+                cart_id=cart_id,
+                rank=rank,
+                title=uploaded_file["filename"],
+                path=path,
+                duration=int(length),
+                uploader_id=current_user.user.id,
+            )
+            added.append(sound)
+            g.dbsession.add(sound)
+            rank += 1
+        if added:
+            await g.dbsession.commit()
+    return added
+
+
+def _queue_analysis_later(sound_ids: list[int]) -> None:
+    if not sound_ids:
+        return
+
+    async def _run() -> None:
+        try:
+            await Scheduler.get().queue_analysis(sound_ids)
+        except RuntimeError:
+            _log.debug("Scheduler is not initialized; skipping analysis queue")
+
+    current_app.add_background_task(_run)
 
 
 def _poke_if_timed(cart: Cart) -> None:
@@ -361,7 +566,7 @@ async def _rename_cart_title(cart: Cart, title: str) -> None:
 @blueprint.get("/carts.json")
 @login_required
 async def carts_json():
-    carts = await Cart.all(g.dbsession, load_sounds=True, load_uploaders=True)
+    carts = await Cart.all(g.dbsession, load_sounds=True, load_uploaders=False)
     return jsonify({"carts": [_cart_json(cart) for cart in carts]})
 
 
@@ -434,34 +639,14 @@ async def delete_cart_json(cart_id: int):
     return jsonify({"ok": True})
 
 
-async def _ingest_json_uploads(cart_id: int, uploads: list) -> list[Sound]:
-    """Keep audio files; skip junk from a dropped folder (.DS_Store, images…)."""
-    added: list[Sound] = []
-    rank = await Sound.next_rank(g.dbsession, cart_id)
-    for uploaded_file in uploads:
-        path = uploaded_file["uploaded_to"]
-        try:
-            metadata = mutagen.File(path)
-        except Exception:
-            metadata = None
-        info = getattr(metadata, "info", None)
-        length = getattr(info, "length", None)
-        if metadata is None or length is None:
-            with contextlib.suppress(OSError):
-                unlink_cart_file(path)
-            continue
-        sound = Sound(
-            cart_id=cart_id,
-            rank=rank,
-            title=uploaded_file["filename"],
-            path=path,
-            duration=int(length),
-            uploader_id=current_user.user.id,
-        )
-        added.append(sound)
-        g.dbsession.add(sound)
-        rank += 1
-    return added
+@blueprint.get("/media/bank.json")
+@login_required
+async def media_bank_json():
+    root = media_root()
+    if not root.is_dir():
+        return jsonify({"available": False, "folders": []})
+    folders = await asyncio.to_thread(list_bank_folders, root)
+    return jsonify({"available": True, "folders": folders})
 
 
 @blueprint.post("/carts/<int:cart_id>/sounds.json")
@@ -473,9 +658,17 @@ async def add_sounds_json(cart_id: int):
     cart = await Cart.from_id(g.dbsession, cart_id)
     if not cart:
         raise NotFound(f"Cart {cart_id} not found")
-    payload = await request.get_json(silent=True)
-    if isinstance(payload, dict) and payload.get("paths"):
-        raw_paths = payload.get("paths")
+    body = await request.get_json(silent=True)
+    if isinstance(body, dict) and (body.get("folders") or body.get("folder")):
+        raw_folders = body.get("folders")
+        if raw_folders is None:
+            raw_folders = [body.get("folder")]
+        if not isinstance(raw_folders, list) or not raw_folders:
+            raise BadRequest("folders list required")
+        uploads = collect_bank_uploads(raw_folders)
+        added_sounds = await _ingest_json_uploads(cart_id, uploads)
+    elif isinstance(body, dict) and body.get("paths"):
+        raw_paths = body.get("paths")
         if not isinstance(raw_paths, list) or not raw_paths:
             raise BadRequest("paths list required")
         uploads = []
@@ -491,11 +684,16 @@ async def add_sounds_json(cart_id: int):
         added_sounds = await _ingest_json_uploads(cart_id, uploads)
     if not added_sounds:
         raise BadRequest("No audio file uploaded")
+    await g.dbsession.flush()
+    sound_ids = [sound.id for sound in added_sounds]
+    if str(request.args.get("delta") or "") == "1":
+        payload = _cart_json(cart, sounds=added_sounds)
+        payload["delta"] = True
+        await g.dbsession.commit()
+        _queue_analysis_later(sound_ids)
+        return jsonify({"cart": payload}), 201
     await g.dbsession.commit()
-    try:
-        await Scheduler.get().queue_analysis([s.id for s in added_sounds])
-    except RuntimeError:
-        _log.debug("Scheduler is not initialized; skipping analysis queue")
+    _queue_analysis_later(sound_ids)
     cart = await _load_cart_json(cart_id)
     return jsonify({"cart": _cart_json(cart)}), 201
 
@@ -795,6 +993,7 @@ async def push_now_json(cart_id: int):
         await Scheduler.get().push_cart(cart_id)
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 400
+    invalidate_conducteur_cache()
     return jsonify({"ok": True})
 
 
@@ -813,6 +1012,7 @@ async def push_sound_now_json(cart_id: int, sound_id: int):
         await Scheduler.get().push_sound(cart_id, sound_id)
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 400
+    invalidate_conducteur_cache()
     return jsonify({"ok": True})
 
 

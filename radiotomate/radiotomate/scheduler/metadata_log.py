@@ -7,6 +7,7 @@ from quart import Blueprint, current_app, g, request
 from radiotomate.auth import token_required
 from radiotomate.models import MetadataLog
 from radiotomate.scheduler.metrics import runtime_metrics
+from radiotomate.services.emissions import overlay_metadata_if_on_air
 
 _log = logging.getLogger(__name__)
 
@@ -104,10 +105,12 @@ async def relay_metadata(raw_md: dict) -> None:
 @token_required
 async def post_metadata_log():
     raw_md = await request.get_json()
+    relay_copy = dict(raw_md or {})
+    await overlay_metadata_if_on_air(g.dbsession, relay_copy)
 
     if current_app.config["RELAY_METADATA_TO"]:
         # POST a copy of the dict because from_playout modifies it
-        current_app.add_background_task(relay_metadata, dict(raw_md))
+        current_app.add_background_task(relay_metadata, relay_copy)
 
     md = await MetadataLog.from_playout(g.dbsession, raw_md)
     g.dbsession.add(md)

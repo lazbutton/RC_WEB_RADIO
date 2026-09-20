@@ -1,6 +1,6 @@
 {% macro menu_item(target, title, is_active) %}
 <a href="{{ url_for(target) }}"
-    class="ntr-nav-item {{ "is-active" if is_active }}"
+    class="suite-nav-item {{ "is-active" if is_active }}"
     {% if is_active %}
     aria-current="page"
     {% endif %}

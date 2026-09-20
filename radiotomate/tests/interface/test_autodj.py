@@ -10,7 +10,7 @@ async def test_autodj_calendar(admin_page: Page, luser_page: Page):  # noqa: PLR
     await page.goto("/")
     await page.nav("Auto-DJ")
     await expect(page.day("Lundi")).to_be_visible()
-    await expect(page.get_by_text("grouping:rotation")).to_be_visible()
+    await expect(page.get_by_text("path:/media/10-rotation")).to_be_visible()
 
     slot = page.slot("24/24 Rotation habillée").first
     await slot.get_by_role("link").click()

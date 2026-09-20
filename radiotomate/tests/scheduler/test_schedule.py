@@ -344,6 +344,30 @@ async def test_push_named_sound(
     assert missing.status_code == 404
 
 
+async def test_timed_playlist_enqueues_two_sounds(  # noqa: PLR0913
+    client: QuartClient,
+    dbsession: ormSession,
+    fake_cart: Cart,
+    fake_sound: Sound,
+    fake_sound2: Sound,
+    auth: dict,
+):
+    fake_sound.rank = 1
+    fake_sound2.rank = 2
+    fake_sound2.gain = -1.0
+    fake_sound2.peak = -0.5
+    await dbsession.commit()
+    with patch(
+        "httpx.AsyncClient.post",
+        return_value=httpx.Response(200, json={"OK": 1}),
+    ) as mock_client:
+        result = await client.post(f"/schedule/{fake_cart.id}/now", headers=auth)
+        assert result.status_code == 200
+        assert mock_client.call_count == 2
+        titles = [call.kwargs["json"]["title"] for call in mock_client.call_args_list]
+        assert titles == [fake_sound.title, fake_sound2.title]
+
+
 async def test_schedule_no_sound_enabled(
     client: QuartClient,
     dbsession: ormSession,

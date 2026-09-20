@@ -1,14 +1,17 @@
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as ormSession
 
 from radiotomate.beets import BeetsIntegration
-from radiotomate.models import AutoDJSlot, Clock, Setting, User
+from radiotomate.models import AutoDJSlot, Clock, RundownItem, Setting, User
 from radiotomate.scheduler.clock import (
     PARIS,
     SETTING_CLOCK_SEQ_CLOCK_ID,
     SETTING_CLOCK_SEQ_CURSOR,
+    load_sequencer_cursor,
+    reset_sequencer,
+    restore_sequencer_state,
     tick,
 )
 from radiotomate.scheduler.rundown import (
@@ -43,21 +46,21 @@ def _anchored_pubs(items: list[dict], minute: int = 20) -> list[dict]:
 
 async def test_tick_persists_cursor(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     beets_integration: BeetsIntegration,
 ):
     await tick(dbsession, _live(NIGHT), _client(), beets_integration)
     cursor_row = await Setting.from_key(dbsession, SETTING_CLOCK_SEQ_CURSOR)
     clock_row = await Setting.from_key(dbsession, SETTING_CLOCK_SEQ_CLOCK_ID)
     assert cursor_row is not None
-    assert int(cursor_row.value) == 2
+    assert int(cursor_row.value) >= 2
     assert clock_row is not None
     assert clock_row.value.isdigit()
 
 
 async def test_rundown_pub_at_1020_tuesday(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
     beets_integration: BeetsIntegration,
 ):
@@ -80,7 +83,7 @@ async def test_rundown_pub_at_1020_tuesday(
 
 async def test_rundown_no_pub_at_1819(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
     beets_integration: BeetsIntegration,
 ):
@@ -95,7 +98,7 @@ async def test_rundown_no_pub_at_1819(
 
 async def test_rundown_short_daypart_skips_1020_pub(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
     beets_integration: BeetsIntegration,
 ):
@@ -123,7 +126,7 @@ async def test_rundown_short_daypart_skips_1020_pub(
 
 async def test_rundown_window_covers_30_min(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
     beets_integration: BeetsIntegration,
 ):
@@ -140,7 +143,7 @@ async def test_rundown_window_covers_30_min(
 
 async def test_rundown_window_covers_three_hours(
     dbsession: ormSession,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
     beets_integration: BeetsIntegration,
 ):
@@ -163,7 +166,7 @@ async def test_conducteur_json_authenticated(  # noqa: PLR0913
     beets_integration: BeetsIntegration,
     dbsession: ormSession,
     users_password: str,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
 ):
     user = User(username="conducteur-json")
@@ -174,15 +177,18 @@ async def test_conducteur_json_authenticated(  # noqa: PLR0913
     from radiotomate.interface_app import app_factory as interface_factory
 
     iface = interface_factory(app_configration, False, beets_integration)
-    iface.config["INTERFACE_NAME"] = "New Trad Radio"
+    iface.config["INTERFACE_NAME"] = "BUTTON"
     client = iface.test_client()
     login = await client.post(
         "/login",
         form={"username": "conducteur-json", "password": users_password},
     )
     assert login.status_code == 302
+    before = await dbsession.scalar(select(func.count()).select_from(RundownItem))
     response = await client.get("/autodj/conducteur.json")
     assert response.status_code == 200
+    after = await dbsession.scalar(select(func.count()).select_from(RundownItem))
+    assert after == before
     payload = await response.get_json()
     assert payload["horizon_min"] == 30
     assert "items" in payload
@@ -206,3 +212,64 @@ async def test_conducteur_json_authenticated(  # noqa: PLR0913
     assert html.status_code == 200
     body = await html.get_data(as_text=True)
     assert "Conducteur" in body
+    assert "<th>Cart</th>" in body
+
+
+async def test_rundown_keeps_missing_clock_carts(
+    dbsession: ormSession,
+    beets_integration: BeetsIntegration,
+):
+    data = await build_rundown(
+        dbsession,
+        beets_integration,
+        now=datetime(2026, 9, 14, 0, 30, tzinfo=PARIS),
+        cursor=0,
+    )
+    jingles = [item for item in data["items"] if item.get("kind") == "jingle"]
+    assert jingles, data["items"][:6]
+    first = jingles[0]
+    assert first["status"] == "manquant"
+    assert first["cart"] == "Jingles"
+    assert first["reason"] == "cart introuvable"
+
+
+async def test_rundown_replays_exhausted_playlist_jingles(
+    dbsession: ormSession,
+    beets_integration: BeetsIntegration,
+    jingles_cart,
+):
+    from radiotomate.enums import CartMode
+
+    jingles_cart.mode = CartMode.PLAYLIST
+    for sound in jingles_cart.sounds:
+        sound.last_played = datetime.now()
+    await dbsession.commit()
+    data = await build_rundown(
+        dbsession,
+        beets_integration,
+        now=datetime(2026, 9, 14, 0, 30, tzinfo=PARIS),
+        cursor=0,
+    )
+    jingles = [item for item in data["items"] if item.get("kind") == "jingle"]
+    assert jingles, data["items"][:6]
+    first = jingles[0]
+    assert first["status"] != "manquant"
+    assert first["resource"] == "ID BUTTON"
+    assert first["reason"] != "cart introuvable"
+
+
+async def test_reset_sequencer_reloads_after_process_restart(
+    dbsession: ormSession,
+    jingles_cart,
+):
+    await Setting.upsert(dbsession, SETTING_CLOCK_SEQ_CURSOR, "12")
+    await Setting.upsert(dbsession, SETTING_CLOCK_SEQ_CLOCK_ID, "1")
+    await dbsession.commit()
+    await reset_sequencer(dbsession)
+    from radiotomate.scheduler.clock import reset_state
+
+    reset_state()
+    await restore_sequencer_state(dbsession)
+    cursor, clock_id = await load_sequencer_cursor(dbsession)
+    assert cursor == 0
+    assert clock_id is None

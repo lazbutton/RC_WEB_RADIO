@@ -1,9 +1,9 @@
 @use "bulma/sass" with (
   $family-primary: 'AtkinsonHyperlegible, Inter, SF Pro, Segoe UI, Roboto, Oxygen, Ubuntu, Helvetica Neue, Helvetica, Arial, sans-serif',
   $family-secondary: 'AtkinsonHyperlegible, Inter, SF Pro, Segoe UI, Roboto, Oxygen, Ubuntu, Helvetica Neue, Helvetica, Arial, sans-serif',
-  $primary: #6b2d1a
+  $primary: #f5f5f5
 );
-@use "ntr";
+@use "suite";
 @use 'bulma/sass/utilities/mixins' as mixins;
 
 .is-active {

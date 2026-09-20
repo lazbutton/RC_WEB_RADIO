@@ -1,0 +1,131 @@
+{
+  "suite": {
+    "id": "button",
+    "name": "BUTTON",
+    "short": "BTN",
+    "tagline": "Suite radio"
+  },
+  "labels": {
+    "hub": {
+      "title": "{name}",
+      "subtitle": "Suite"
+    },
+    "player": {
+      "title": "{name} — à l’antenne",
+      "listen": "Écouter {name}",
+      "stop": "Arrêter {name}"
+    },
+    "pads": {
+      "title": "Pads",
+      "subtitle": "Grille"
+    },
+    "ingest": {
+      "title": "{name} Banque",
+      "mark": "{short}",
+      "kicker": "BANQUE",
+      "connected": "Connecté au share {share}."
+    },
+    "automate": {
+      "interfaceName": "{name}",
+      "subtitle": "Console d’antenne",
+      "login": "Accès studio"
+    },
+    "festival": {
+      "title": "Grille NTF#4"
+    },
+    "inbox": {
+      "title": "Inbox Zero",
+      "org": "{name}"
+    },
+    "console": {
+      "title": "Horloges"
+    },
+    "catalog": {
+      "title": "Catalogue"
+    },
+    "nextcloud": {
+      "title": "Fichiers"
+    },
+    "onair": {
+      "title": "Afficheur"
+    },
+    "icecast": {
+      "title": "Flux"
+    }
+  },
+  "infra": {
+    "smbShare": "BUTTON-Media",
+    "mediaDataset": "data/media/button",
+    "mediaMount": "/mnt/data/media/button",
+    "group": "buttonmedia",
+    "partnerCode": "BTN",
+    "smbHost": "192.168.1.100",
+    "smbUser": "lazbutton"
+  },
+  "apps": {
+    "hub": {
+      "url": "http://192.168.1.100:30120",
+      "health": "/brand.json"
+    },
+    "console": {
+      "url": "http://192.168.1.100:30126"
+    },
+    "catalog": {
+      "url": "http://192.168.1.100:30127",
+      "health": "/health"
+    },
+    "inbox": {
+      "url": "http://192.168.1.100:30128",
+      "health": "/health"
+    },
+    "automate": {
+      "url": "http://192.168.1.100:6811"
+    },
+    "icecast": {
+      "url": "http://192.168.1.100:18000",
+      "stream": "http://192.168.1.100:18000/ntradio.mp3",
+      "status": "http://192.168.1.100:18000/status-json.xsl"
+    },
+    "nowplaying": {
+      "url": "http://192.168.1.100:6820/now.json"
+    },
+    "harbor": {
+      "url": "http://192.168.1.100:6800"
+    },
+    "pads": {
+      "url": "http://127.0.0.1:5176"
+    },
+    "player": {
+      "url": "http://127.0.0.1:5174",
+      "streamUrl": "http://127.0.0.1:18000/ntradio.mp3",
+      "productionStreamUrl": "https://radio.lazbutton.xyz/ntradio.mp3",
+      "nowUrl": "http://127.0.0.1:6820/now.json",
+      "icecastStatusUrl": "http://127.0.0.1:18000/status-json.xsl",
+      "festivalUrl": "https://newtradfest.com/"
+    },
+    "festival": {
+      "url": "http://127.0.0.1:8765/festival/"
+    }
+  },
+  "tailscaleBase": "http://nasgul.taild4714f.ts.net",
+  "theme": {
+    "appearance": "dark",
+    "bg": "#0a0a0a",
+    "surface1": "#121212",
+    "surface2": "#1a1a1a",
+    "surface3": "#242424",
+    "border": "rgb(255 255 255 / 0.10)",
+    "text": "#f5f5f5",
+    "muted": "#a3a3a3",
+    "faint": "#737373",
+    "accent": "#f5f5f5",
+    "accentHover": "#ffffff",
+    "ink": "#0a0a0a",
+    "live": "#ff4d4d",
+    "ok": "#3ecf8e",
+    "vuOk": "#3ecf8e",
+    "vuWarn": "#f0e24a",
+    "vuHot": "#ff7a45",
+    "vuClip": "#ff4d4d"
+  }
+}

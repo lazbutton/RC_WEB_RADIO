@@ -44,6 +44,10 @@ printf "Radiotomate install script starting at %s\n\n\n\n" "$(date)"
 # Files copied/moved to this folder will be automatically moved to the music collection.
 : "${MUSIC_DROPBOX:=$DATA_ROOT/MusicDropbox}"
 
+# Banque Nasgul (même arbre que le catalogue). Si vide, Banque console = injoignable.
+: "${MEDIA_HOST:=}"
+: "${MEDIA_ROOT:=/media}"
+
 # if you don't want to enter the admin password interactively, set this variable
 : "${ADMIN_PASSWORD:=}"
 
@@ -63,7 +67,7 @@ printf "Radiotomate install script starting at %s\n\n\n\n" "$(date)"
 #######################################################################################
 
 printf "We computed the following parameters (this can be useful when re-installing):\n"
-for v in UNIT_NAME DATA_ROOT STREAM_INPUT_PORT STREAM_INPUT_NAME INTERFACE_PORT USE_PULSEAUDIO INSTALL_QUADLET BEETSDIR MUSIC_DIRECTORY MUSIC_DROPBOX ASK_FOR_CONFIRMATION DEBUG PLAYOUT_IMAGE WEBAPPS_IMAGE
+for v in UNIT_NAME DATA_ROOT STREAM_INPUT_PORT STREAM_INPUT_NAME INTERFACE_PORT USE_PULSEAUDIO INSTALL_QUADLET BEETSDIR MUSIC_DIRECTORY MUSIC_DROPBOX MEDIA_HOST MEDIA_ROOT ASK_FOR_CONFIRMATION DEBUG PLAYOUT_IMAGE WEBAPPS_IMAGE
 do
   printf "%s=\"%s\" " "$v" "${!v}"
 done
@@ -257,6 +261,27 @@ EOF
         PULSEAUDIO_VOLUME=""
     fi
 
+    if [[ -n "$MEDIA_HOST" ]]
+    then
+        MEDIA_ENV="
+      - name: MEDIA_ROOT
+        value: $MEDIA_ROOT
+"
+        MEDIA_MOUNT="
+      - mountPath: $MEDIA_ROOT:z
+        name: media-volume
+"
+        MEDIA_VOLUME="
+    - name: media-volume
+      hostPath:
+        path: $MEDIA_HOST
+"
+    else
+        MEDIA_ENV=""
+        MEDIA_MOUNT=""
+        MEDIA_VOLUME=""
+    fi
+
     # notes on the Kube manifest:
     # - we bind the host's timezone to ensure that containers are on the same time
     # - podman annotation is equivalent to --userns=keep-id, so containers read/write files like the running user
@@ -278,6 +303,7 @@ spec:
     env:
       - name: RTCONFIG
         value: $RTCONFIG
+$MEDIA_ENV
 $SECURITY_CONTEXT
     volumeMounts:
       - mountPath: $DATA_ROOT:z
@@ -287,6 +313,7 @@ $SECURITY_CONTEXT
       - mountPath: /etc/localtime:z
         name: tz-config
 $PULSEAUDIO_MOUNT
+$MEDIA_MOUNT
     ports:
       - containerPort: 6800
         hostPort: $STREAM_INPUT_PORT
@@ -315,6 +342,7 @@ $PULSEAUDIO_MOUNT
         value: $BEETSDIR
       - name: RTCONFIG
         value: $RTCONFIG
+$MEDIA_ENV
     volumeMounts:
       - mountPath: $DATA_ROOT:z
         name: data-volume
@@ -324,6 +352,7 @@ $PULSEAUDIO_MOUNT
         name: beetsmusic
       - mountPath: /etc/localtime:z
         name: tz-config
+$MEDIA_MOUNT
     ports:
       - containerPort: 6811
         hostPort: $INTERFACE_PORT
@@ -352,6 +381,7 @@ $PULSEAUDIO_MOUNT
         value: $BEETSDIR
       - name: RTCONFIG
         value: $RTCONFIG
+$MEDIA_ENV
     volumeMounts:
       - mountPath: $DATA_ROOT:z
         name: data-volume
@@ -361,6 +391,7 @@ $PULSEAUDIO_MOUNT
         name: beetsmusic
       - mountPath: /etc/localtime:z
         name: tz-config
+$MEDIA_MOUNT
     livenessProbe:
       httpGet:
         path: /health/live
@@ -411,6 +442,7 @@ $PULSEAUDIO_MOUNT
         path: /etc/localtime
         type: File
 $PULSEAUDIO_VOLUME
+$MEDIA_VOLUME
 
 EOF
 

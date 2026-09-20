@@ -13,6 +13,7 @@ from werkzeug.exceptions import HTTPException
 
 import radiotomate.models
 from radiotomate.auth import RadiotomateAuth, redirect_to_login
+from radiotomate.brand import apply_automate_config
 from radiotomate.beets import BeetsIntegration
 from radiotomate.db import PathLike, QuartAlchemy
 from radiotomate.domain import DomainError
@@ -28,6 +29,7 @@ from radiotomate.interface import (
     login,
     spa,
     users,
+    emissions,
 )
 from radiotomate.quart import CustomQuart
 from radiotomate.templates import RADIOTOMATE_HELPERS
@@ -106,6 +108,7 @@ def app_factory(config: dict, reload: bool, beets: BeetsIntegration):
             "CONSOLE_DIST": config.get("interface", {}).get("console_dist") or None,
         },
     )
+    apply_automate_config(app.config)
 
     app.register_blueprint(health.blueprint)
     app.register_blueprint(home.blueprint)
@@ -115,6 +118,7 @@ def app_factory(config: dict, reload: bool, beets: BeetsIntegration):
     app.register_blueprint(carts.blueprint)
     app.register_blueprint(live.blueprint)
     app.register_blueprint(autodj.blueprint)
+    app.register_blueprint(emissions.blueprint)
     app.register_blueprint(library.blueprint)
     app.register_blueprint(csrf.blueprint)
     spa.register(app)
@@ -137,6 +141,7 @@ def app_factory(config: dict, reload: bool, beets: BeetsIntegration):
         async with db.session() as session:
             dbsettings = await radiotomate.models.Setting.load_all(session)
             app.config.from_mapping(dbsettings)
+        apply_automate_config(app.config)
 
         # start the live data watch
         app.add_background_task(live.watch_livedata_task)

@@ -67,7 +67,7 @@ async def stream_form(
                 if isinstance(result, MultipartSegment):
                     if result.filename:
                         target_path = safe_path(base_path, result.filename)
-                        current_file = target_path.open("wb")
+                        current_file = target_path.open("wb", buffering=1024 * 1024)
                         stack.enter_context(current_file)
                         form_fields[result.name] = {
                             "filename": result.filename,

@@ -13,7 +13,7 @@ from tests.scheduler.test_studio_json import _login
 def _demo_app(app_configration: dict, beets_integration: BeetsIntegration):
     Scheduler.reset_instance()
     iface = interface_factory(app_configration, False, beets_integration)
-    iface.config["INTERFACE_NAME"] = "New Trad Radio"
+    iface.config["INTERFACE_NAME"] = "BUTTON"
     Scheduler.init(app_configration, iface, demo=True)
     return iface
 
@@ -34,7 +34,7 @@ async def test_demo_live_skip_and_fire_sound(  # noqa: PLR0913
     beets_integration: BeetsIntegration,
     dbsession: ormSession,
     users_password: str,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
 ):
     user = User(username="demo-overlay")
@@ -43,7 +43,7 @@ async def test_demo_live_skip_and_fire_sound(  # noqa: PLR0913
     dbsession.add(user)
     await dbsession.commit()
     sound = await dbsession.scalar(
-        select(Sound).where(Sound.cart_id == jingles_ntr_cart.id)
+        select(Sound).where(Sound.cart_id == jingles_cart.id)
     )
     assert sound is not None
 
@@ -68,7 +68,7 @@ async def test_demo_live_skip_and_fire_sound(  # noqa: PLR0913
             )
 
             fired = await client.post(
-                f"/carts/{jingles_ntr_cart.id}/sounds/{sound.id}/now.json",
+                f"/carts/{jingles_cart.id}/sounds/{sound.id}/now.json",
             )
             assert fired.status_code == 200
             now = await (await client.get("/live.json")).get_json()
@@ -84,7 +84,7 @@ async def test_demo_conducteur_follows_live_queue(  # noqa: PLR0913
     beets_integration: BeetsIntegration,
     dbsession: ormSession,
     users_password: str,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
 ):
     user = User(username="demo-conducteur")

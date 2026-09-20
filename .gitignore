@@ -1,5 +1,6 @@
 .DS_Store
 .env
+secrets/
 ops/secrets.env
 ops/local/data/
 ops/local/now.json

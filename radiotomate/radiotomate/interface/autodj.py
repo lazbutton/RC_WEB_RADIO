@@ -1,6 +1,8 @@
 import logging
+from contextlib import suppress
 from datetime import datetime
 from random import randint, sample
+from time import monotonic
 
 from quart import Blueprint, g, jsonify, render_template, request, url_for
 from werkzeug.datastructures import MultiDict
@@ -12,7 +14,15 @@ from radiotomate.enums import DayNames
 from radiotomate.interface import safe_int
 from radiotomate.interface.json_util import forbidden_unless, read_json_object
 from radiotomate.models import AutoDJSlot, Clock, MusicCategory
-from radiotomate.scheduler.execution import published_rundown
+from radiotomate.scheduler.execution import (
+    attach_desk_pins,
+    delete_desk_item,
+    insert_desk_item,
+    patch_desk_item,
+    preview_rundown,
+    reorder_desk_items,
+    reset_conducteur,
+)
 from radiotomate.scheduler.rundown import (
     DEFAULT_HORIZON_MIN,
     MAX_HORIZON_MIN,
@@ -35,6 +45,12 @@ blueprint = Blueprint("autodj", __name__, template_folder="templates")
 
 REM_PER_HOUR = 4
 MIN_PER_DAY = 24 * 60
+CONDUCTEUR_CACHE_TTL = 8.0
+_conducteur_cache: dict[int, tuple[float, dict]] = {}
+
+
+def invalidate_conducteur_cache() -> None:
+    _conducteur_cache.clear()
 
 
 def random_color():
@@ -140,22 +156,155 @@ async def index():
     )
 
 
-async def _conducteur_payload() -> dict:
-    beets = BeetsIntegration.get()
+def _conducteur_horizon() -> int:
     horizon = safe_int(request.args.get("horizon"), DEFAULT_HORIZON_MIN, True)
     horizon = horizon or DEFAULT_HORIZON_MIN
-    horizon = min(MAX_HORIZON_MIN, max(MIN_HORIZON_MIN, horizon))
+    return min(MAX_HORIZON_MIN, max(MIN_HORIZON_MIN, horizon))
+
+
+def _wants_conducteur_reset(data: dict) -> bool:
+    if data.get("reset") in (True, "true", 1, "1"):
+        return True
+    return str(data.get("action") or "").strip().lower() == "reset"
+
+
+async def _conducteur_payload(*, force: bool = False) -> dict:
+    beets = BeetsIntegration.get()
+    horizon = _conducteur_horizon()
+    if not force:
+        cached = _conducteur_cache.get(horizon)
+        if cached and monotonic() - cached[0] < CONDUCTEUR_CACHE_TTL:
+            return await attach_desk_pins(g.dbsession, cached[1])
     try:
         scheduler = Scheduler.get()
+        payload = await scheduler.live_rundown(
+            g.dbsession,
+            beets,
+            horizon_min=horizon,
+            force=force,
+        )
     except RuntimeError:
-        return await published_rundown(g.dbsession, beets, horizon_min=horizon)
-    return await scheduler.live_rundown(g.dbsession, beets, horizon_min=horizon)
+        payload = await preview_rundown(g.dbsession, beets, horizon_min=horizon)
+    _conducteur_cache[horizon] = (monotonic(), payload)
+    return await attach_desk_pins(g.dbsession, payload)
 
 
 @blueprint.get("/autodj/conducteur.json")
 @login_required
 async def conducteur_json():
     return jsonify(await _conducteur_payload())
+
+
+@blueprint.post("/autodj/conducteur.json")
+@login_required
+async def conducteur_rebuild_json():
+    deny = forbidden_unless("autodj")
+    if deny:
+        return deny
+    data = await request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise BadRequest("JSON object required")
+    invalidate_conducteur_cache()
+    if _wants_conducteur_reset(data):
+        beets = BeetsIntegration.get()
+        payload = await reset_conducteur(
+            g.dbsession,
+            beets,
+            horizon_min=_conducteur_horizon(),
+        )
+        with suppress(RuntimeError):
+            Scheduler.get().discard_forecast()
+        _conducteur_cache[_conducteur_horizon()] = (monotonic(), payload)
+        return jsonify(await attach_desk_pins(g.dbsession, payload))
+    payload = await _conducteur_payload(force=True)
+    payload = dict(payload)
+    payload["action"] = "refresh"
+    return jsonify(payload)
+
+
+def _desk_live_forbidden():
+    return forbidden_unless("live")
+
+
+async def _desk_payload() -> dict:
+    invalidate_conducteur_cache()
+    return await _conducteur_payload(force=True)
+
+
+@blueprint.post("/autodj/conducteur/items.json")
+@login_required
+async def conducteur_insert_item_json():
+    deny = _desk_live_forbidden()
+    if deny:
+        return deny
+    data = await read_json_object()
+    await insert_desk_item(g.dbsession, data)
+    return jsonify(await _desk_payload())
+
+
+@blueprint.patch("/autodj/conducteur/items/<item_id>.json")
+@login_required
+async def conducteur_patch_item_json(item_id: str):
+    deny = _desk_live_forbidden()
+    if deny:
+        return deny
+    data = await read_json_object()
+    await patch_desk_item(g.dbsession, item_id, data)
+    return jsonify(await _desk_payload())
+
+
+@blueprint.delete("/autodj/conducteur/items/<item_id>.json")
+@login_required
+async def conducteur_delete_item_json(item_id: str):
+    deny = _desk_live_forbidden()
+    if deny:
+        return deny
+    await delete_desk_item(g.dbsession, item_id)
+    return jsonify(await _desk_payload())
+
+
+@blueprint.put("/autodj/conducteur/items/ranks.json")
+@login_required
+async def conducteur_reorder_items_json():
+    deny = _desk_live_forbidden()
+    if deny:
+        return deny
+    data = await read_json_object()
+    ids = data.get("ids")
+    if not isinstance(ids, list):
+        raise BadRequest("ids required")
+    await reorder_desk_items(g.dbsession, [str(item_id) for item_id in ids])
+    return jsonify(await _desk_payload())
+
+
+@blueprint.post("/autodj/conducteur/now.json")
+@login_required
+async def conducteur_fire_now_json():
+    deny = _desk_live_forbidden()
+    if deny:
+        return deny
+    data = await read_json_object()
+    path = str(data.get("path") or "").strip()
+    if not path:
+        raise BadRequest("path required")
+    from radiotomate.models import Sound
+
+    sound = await Sound.from_media_path(g.dbsession, path)
+    scheduler = Scheduler.get()
+    if sound is not None:
+        await scheduler.push_sound(sound.cart_id, sound.id)
+    else:
+        await insert_desk_item(g.dbsession, data)
+        await scheduler.push_path(
+            path,
+            artist=str(data.get("artist") or ""),
+            title=str(data.get("title") or ""),
+            kind=str(data.get("kind") or "son"),
+        )
+    invalidate_conducteur_cache()
+    return jsonify(await _desk_payload())
 
 
 @blueprint.get("/autodj/clocks.json")

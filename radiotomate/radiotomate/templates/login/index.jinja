@@ -3,16 +3,16 @@
 
 {% from 'macros.jinja' import password_field %}
 {% block content %}
-<main class="ntr-login">
+<main class="suite-login">
     <form method="POST"
-        class="ntr-login-card"
+        class="suite-login-card"
         hx-post="{{ url_for('login.log_in') }}"
         hx-disabled-elt="find button[type=submit]"
         >
-        <div class="ntr-login-brand">
-            <img src="{{ url_for('static', filename='logo-ntr.svg') }}" alt="">
-            <h1>New Trad Radio</h1>
-            <p>Accès studio</p>
+        <div class="suite-login-brand">
+            <img src="{{ url_for('static', filename='logo.svg') }}" alt="">
+            <h1>{{ config['INTERFACE_NAME'] }}</h1>
+            <p>{{ config.get('SUITE_LOGIN', 'Accès studio') }}</p>
         </div>
         <div class="field">
             <label for="username" class="label">Identifiant</label>

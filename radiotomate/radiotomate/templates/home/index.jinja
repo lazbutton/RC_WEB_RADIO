@@ -9,16 +9,16 @@
     sse-swap="message"
     >
 
-    <div class="ntr-desk ntr-desk--waiting">
-        <div class="ntr-desk-toolbar">
+    <div class="suite-desk suite-desk--waiting">
+        <div class="suite-desk-toolbar">
             <span
                 id="skipbutton"
-                class="ntr-skip-wrap"
+                class="suite-skip-wrap"
                 hx-preserve
                 >
                 {% if current_user.user.can_live() %}
                     <button
-                        class="button is-danger ntr-skip"
+                        class="button is-danger suite-skip"
                         hx-delete="{{ url_for('live.skip') }}"
                         hx-on::confirm="confirmWithMessage(`Passer le morceau en cours ?`)"
                         hx-swap="none"
@@ -27,24 +27,24 @@
                         >
                         Passer le morceau
                     </button>
-                    <p class="ntr-skip-hint">Espace ou S</p>
+                    <p class="suite-skip-hint">Espace ou S</p>
                 {% endif %}
             </span>
         </div>
-        <p class="ntr-waiting">En attente des informations d’antenne…</p>
+        <p class="suite-waiting">En attente des informations d’antenne…</p>
     </div>
 </div>
 </section>
 
 <script>
 function setOnAirStandby() {
-    var el = document.getElementById("ntr-onair");
+    var el = document.getElementById("suite-onair");
     if (!el) {
         return;
     }
-    el.className = "ntr-onair is-standby";
+    el.className = "suite-onair is-standby";
     el.setAttribute("aria-label", "STANDBY");
-    var label = el.querySelector(".ntr-onair-label");
+    var label = el.querySelector(".suite-onair-label");
     if (label) {
         label.textContent = "STANDBY";
     }
@@ -98,14 +98,14 @@ document.body.addEventListener('htmx:sseError', function () {
     var skip = document.getElementById("skipbutton");
     root.innerHTML = "";
     var desk = document.createElement("div");
-    desk.className = "ntr-desk";
+    desk.className = "suite-desk";
     var toolbar = document.createElement("div");
-    toolbar.className = "ntr-desk-toolbar";
+    toolbar.className = "suite-desk-toolbar";
     if (skip) {
         toolbar.appendChild(skip);
     }
     var msg = document.createElement("p");
-    msg.className = "ntr-sse-error";
+    msg.className = "suite-sse-error";
     msg.textContent = "Impossible de joindre le playout. Vérifiez que le moteur est démarré.";
     desk.appendChild(toolbar);
     desk.appendChild(msg);

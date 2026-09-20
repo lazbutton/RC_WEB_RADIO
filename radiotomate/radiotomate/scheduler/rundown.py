@@ -36,6 +36,7 @@ DEFAULT_HORIZON_MIN = 30
 MAX_HORIZON_MIN = 18 * 60
 STATUS_PLANNED = "prévu"
 STATUS_RESCUE = "secours"
+STATUS_MISSING = "manquant"
 
 
 def rest_of_day_minutes(now: datetime | None = None) -> int:
@@ -148,6 +149,18 @@ def _item_payload(  # noqa: PLR0913
     return payload
 
 
+def _clock_cart_ref(pos: ClockPosition, clock: Clock) -> tuple[int | None, str]:
+    for cart_id, title in (
+        (pos.cart_id, pos.cart_title),
+        (pos.fallback_cart_id, pos.fallback_cart_title),
+        (clock.fallback_cart_id, clock.fallback_cart_title),
+    ):
+        label = (title or "").strip()
+        if cart_id is not None or label:
+            return cart_id, label
+    return None, ""
+
+
 async def _resolve_cart(
     session: ormSession,
     pos: ClockPosition,
@@ -176,13 +189,26 @@ async def _resolve_cart(
 async def _header(
     session: ormSession,
     now: datetime,
+    *,
+    slot_at=None,
+    next_slot=None,
+    clock_for=None,
 ) -> tuple[str | None, str | None]:
     minute_of_day = now.hour * 60 + now.minute
-    slot = await AutoDJSlot.from_time(session, minute_of_day, now.weekday())
+    if slot_at is not None:
+        slot = slot_at(now.weekday(), minute_of_day)
+    else:
+        slot = await AutoDJSlot.from_time(session, minute_of_day, now.weekday())
     if slot is None or not slot.clock_id:
         return None, None
-    clock = await Clock.from_id(session, slot.clock_id)
-    nxt = await AutoDJSlot.next_after(session, slot)
+    if clock_for is not None:
+        clock = await clock_for(slot.clock_id)
+    else:
+        clock = await Clock.from_id(session, slot.clock_id)
+    if next_slot is not None:
+        nxt = next_slot(slot)
+    else:
+        nxt = await AutoDJSlot.next_after(session, slot)
     end = slot.daypart_end_minute(nxt)
     clock_name = clock.name if clock else None
     return clock_name, daypart_label(slot, end)
@@ -199,7 +225,33 @@ async def _prepare_cart(  # noqa: PLR0913
 ) -> tuple[dict, float] | None:
     sound, cart, rescue = await _resolve_cart(session, pos, clock)
     if sound is None or cart is None:
-        return None
+        cart_id, title = _clock_cart_ref(pos, clock)
+        if title:
+            label = title
+        elif cart_id is not None:
+            label = f"cart #{cart_id}"
+        else:
+            label = "Cart manquant"
+        payload = _item_payload(
+            at=at,
+            kind=pos.kind,
+            when=when,
+            resource=label,
+            queue=_queue_for(pos.kind, when),
+            status=STATUS_MISSING,
+            clock_name=clock.name,
+            daypart=daypart,
+            duration=DEFAULT_CART_SEC,
+            minute=pos.minute if when == "anchored" else None,
+            sync=pos.sync if when == "anchored" else None,
+            cart=label,
+            clock_id=clock.id,
+            position_id=pos.id,
+            cart_id=cart_id,
+        )
+        payload["status_code"] = "failed"
+        payload["reason"] = "cart introuvable"
+        return payload, DEFAULT_CART_SEC
     resource = (sound.title or "").strip() or cart.title
     duration = _duration_seconds(sound.duration, DEFAULT_CART_SEC)
     payload = _item_payload(
@@ -304,7 +356,42 @@ async def build_rundown(  # noqa: PLR0912, PLR0915
     now = now_paris(now)
     deadline = now + timedelta(minutes=horizon_min)
     hard_cap = now + timedelta(minutes=max(horizon_min * 2, 60))
-    header_clock, header_daypart = await _header(session, now)
+    slots = list(await AutoDJSlot.all(session))
+    by_day: dict[int, list[AutoDJSlot]] = {}
+    for slot_row in slots:
+        by_day.setdefault(slot_row.day_of_week, []).append(slot_row)
+    for day_slots in by_day.values():
+        day_slots.sort(key=lambda row: row.minute)
+    clocks: dict[int, Clock | None] = {}
+
+    def slot_at(day: int, minute: int) -> AutoDJSlot | None:
+        found = None
+        for row in by_day.get(day, []):
+            if row.minute <= minute:
+                found = row
+            else:
+                break
+        return found
+
+    def next_slot(slot: AutoDJSlot) -> AutoDJSlot | None:
+        for row in by_day.get(slot.day_of_week, []):
+            if row.minute > slot.minute:
+                return row
+        nxt_day = by_day.get((slot.day_of_week + 1) % 7, [])
+        return nxt_day[0] if nxt_day else None
+
+    async def clock_for(clock_id: int) -> Clock | None:
+        if clock_id not in clocks:
+            clocks[clock_id] = await Clock.from_id(session, clock_id)
+        return clocks[clock_id]
+
+    header_clock, header_daypart = await _header(
+        session,
+        now,
+        slot_at=slot_at,
+        next_slot=next_slot,
+        clock_for=clock_for,
+    )
     saved_cursor, saved_clock_id = await load_sequencer_cursor(session)
 
     items: list[dict] = []
@@ -321,12 +408,12 @@ async def build_rundown(  # noqa: PLR0912, PLR0915
             break
 
         minute_of_day = t.hour * 60 + t.minute
-        slot = await AutoDJSlot.from_time(session, minute_of_day, t.weekday())
+        slot = slot_at(t.weekday(), minute_of_day)
         if slot is None or not slot.clock_id:
             t += timedelta(minutes=1)
             continue
 
-        clock = await Clock.from_id(session, slot.clock_id)
+        clock = await clock_for(slot.clock_id)
         if clock is None:
             t += timedelta(minutes=1)
             continue
@@ -343,7 +430,7 @@ async def build_rundown(  # noqa: PLR0912, PLR0915
             sim_cursor = 0
             sim_clock_id = clock.id
 
-        nxt = await AutoDJSlot.next_after(session, slot)
+        nxt = next_slot(slot)
         slot_end = slot.daypart_end_minute(nxt)
         label = daypart_label(slot, slot_end)
         sequential = clock.sequential_positions()

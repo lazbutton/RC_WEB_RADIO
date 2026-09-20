@@ -37,9 +37,9 @@ def register(app: Quart) -> None:
             return "Not found", 404
         return await send_from_directory(dist / "assets", filename)
 
-    @app.get("/logo-ntr.svg")
+    @app.get("/logo.svg")
     async def spa_logo():
         dist = console_dist()
         if dist is None:
             return "Not found", 404
-        return await send_from_directory(dist, "logo-ntr.svg")
+        return await send_from_directory(dist, "logo.svg")

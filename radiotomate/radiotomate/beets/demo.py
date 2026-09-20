@@ -176,18 +176,20 @@ class BeetsMockIntegration(BeetsIntegration):
         if self._seed_items:
             return
 
-        for _ in range(5):
+        for i in range(5):
             helper.add_item(
                 artist=FAKE_ARTIST,
                 title=artistic_generator(),
                 grouping="rotation",
+                path=f"/media/10-rotation/camille-{i}.mp3",
             )
 
-        for _ in range(100):
+        for i in range(100):
             helper.add_item(
                 artist=artistic_generator(),
                 title=artistic_generator(),
                 grouping="rotation",
+                path=f"/media/10-rotation/track-{i}.mp3",
             )
 
     def teardown(self):

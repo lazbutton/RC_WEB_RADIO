@@ -6,10 +6,11 @@ from datetime import datetime
 from http.client import HTTPException
 
 from hypercorn.utils import ShutdownError
-from quart import Blueprint, jsonify, make_response, request
+from quart import Blueprint, g, jsonify, make_response, request
 from quart_auth import current_user
 
 from radiotomate.auth import login_required, permission_required
+from radiotomate.interface.autodj import invalidate_conducteur_cache
 from radiotomate.quart import or_shutdown
 from radiotomate.scheduler_api import Scheduler
 from radiotomate.templates import render_macro as general_render_macro
@@ -72,9 +73,12 @@ def _cue(value: object) -> dict | None:
 def normalize_live(md: dict) -> dict:
     raw_status = str(md.get("status") or "")
     status = "simulating" if raw_status == "simulating" else "playing"
+    source = str(md.get("source") or "")
+    if "insert_initial_track_mark" in source.lower():
+        source = ""
     return {
         "status": status,
-        "source": str(md.get("source") or ""),
+        "source": source,
         "artist": str(md.get("artist") or ""),
         "title": str(md.get("title") or ""),
         "album": str(md.get("album") or ""),
@@ -85,7 +89,19 @@ def normalize_live(md: dict) -> dict:
         "next_autodj": _cue(md.get("next_autodj")),
         "next_jingle": _cue(md.get("next_jingle")),
         "next_cart": _cue(md.get("next_cart")),
+        "autodj_queued": _queued_field(md.get("autodj_queued")),
+        "jingles_queued": _queued_field(md.get("jingles_queued")),
+        "carts_queued": _queued_field(md.get("carts_queued")),
     }
+
+
+def _queued_field(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
 
 
 @blueprint.get("/live")
@@ -128,7 +144,13 @@ async def get():
 @blueprint.get("/live.json")
 @login_required
 async def live_json():
-    return jsonify(get_live_snapshot())
+    snapshot = dict(get_live_snapshot())
+    from radiotomate.services.emissions import attach_live_emission
+
+    dirty = await attach_live_emission(g.dbsession, snapshot)
+    if dirty:
+        await g.dbsession.commit()
+    return jsonify(snapshot)
 
 
 async def watch_livedata_task():
@@ -160,7 +182,8 @@ async def watch_livedata_task():
 @blueprint.delete("/live")
 @permission_required("live")
 async def skip():
-    await (Scheduler.get()).skip()
+    await Scheduler.get().skip()
+    invalidate_conducteur_cache()
     return "", 200
 
 
@@ -170,4 +193,5 @@ async def skip_json():
     if not current_user.user.can_live():
         return jsonify({"error": "forbidden"}), 403
     await Scheduler.get().skip()
+    invalidate_conducteur_cache()
     return jsonify({"ok": True})

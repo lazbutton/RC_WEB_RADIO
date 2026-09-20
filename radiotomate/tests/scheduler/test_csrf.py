@@ -9,13 +9,13 @@ from tests.scheduler.test_admin_json import _admin_client
 
 CLOCK_BODY = {
     "name": "CSRF clock",
-    "fallback_cart": "Jingles NTR",
+    "fallback_cart": "Jingles",
     "motif": [
         {
             "kind": "jingle",
-            "cart": "Jingles NTR",
+            "cart": "Jingles",
             "category": None,
-            "fallback_cart": "Jingles NTR",
+            "fallback_cart": "Jingles",
         }
     ],
     "anchors": [],
@@ -81,7 +81,7 @@ async def test_mutation_requires_csrf_token(  # noqa: PLR0913
     beets_integration: BeetsIntegration,
     dbsession: ormSession,
     users_password: str,
-    jingles_ntr_cart,
+    jingles_cart,
 ):
     client = await _admin_client(
         _csrf_config(app_configration),

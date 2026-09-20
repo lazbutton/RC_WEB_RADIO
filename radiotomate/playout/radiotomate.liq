@@ -432,6 +432,9 @@ def post_to_live()
   fill_next(data, "next_jingle", jingles_queue, next_jingle)
   fill_next(data, "next_autodj", autodj_queue, next_autodj)
   fill_next(data, "next_cart", carts_queue, next_cart)
+  data.add("jingles_queued", jingles_queue.length())
+  data.add("autodj_queued", autodj_queue.length())
+  data.add("carts_queued", carts_queue.length())
 
   _ = post_to_radiotomate("/live", data)
 end

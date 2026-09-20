@@ -2,7 +2,7 @@ from sqlalchemy import text
 
 CLOCK_24 = "24/24 Rotation habillée"
 CLOCK_JOURNEE = "Journée pubs"
-CART_JINGLES = "Jingles NTR"
+CART_JINGLES = "Jingles"
 CART_PUBS = "Pubs"
 COLOR_24 = "#3d5a4c"
 COLOR_JOURNEE = "#c45c26"

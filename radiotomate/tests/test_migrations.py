@@ -13,6 +13,7 @@ ESSENTIAL_TABLES = {
     "autodj_slots",
     "rundown_items",
     "playout_commands",
+    "emissions",
 }
 
 
@@ -57,6 +58,11 @@ async def test_migrations_blank_database_then_idempotent(tmp_path: Path):
     names = await _table_names(db.engine)
     missing = ESSENTIAL_TABLES - names
     assert not missing, missing
+    async with db.engine.connect() as conn:
+        result = await conn.execute(
+            text("select query from music_categories where name='Rotation'")
+        )
+        assert result.scalar_one() == "path:/media/10-rotation"
 
     await do_update(db.engine)
     assert await _schema_version(db.engine) == latest

@@ -47,6 +47,8 @@ def item_status_code(item: dict) -> str:
     if raw:
         return raw
     label = str(item.get("status") or "").strip()
+    if label == "manquant":
+        return RundownStatus.FAILED.value
     for code, text in STATUS_LABELS.items():
         if label == text:
             return code

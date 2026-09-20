@@ -2,17 +2,17 @@
 {%- set raw = (source or '')|string -%}
 {%- set key = raw|lower -%}
 {%- if key in ['stream', 'live'] -%}
-<span class="ntr-source ntr-source--live">Direct</span>
+<span class="suite-source suite-source--live">Direct</span>
 {%- elif key in ['autodj', 'auto-dj'] -%}
-<span class="ntr-source ntr-source--autodj">Auto-DJ</span>
+<span class="suite-source suite-source--autodj">Auto-DJ</span>
 {%- elif key in ['carts', 'cart'] or key.startswith('cart') -%}
-<span class="ntr-source ntr-source--cart">Cart</span>
+<span class="suite-source suite-source--cart">Cart</span>
 {%- elif key == 'relay' -%}
-<span class="ntr-source ntr-source--cart">Relais</span>
+<span class="suite-source suite-source--cart">Relais</span>
 {%- elif key == 'jingles' -%}
-<span class="ntr-source ntr-source--autodj">Jingle</span>
+<span class="suite-source suite-source--autodj">Jingle</span>
 {%- elif raw -%}
-<span class="ntr-source">{{ raw }}</span>
+<span class="suite-source">{{ raw }}</span>
 {%- endif -%}
 {% endmacro %}
 
@@ -33,16 +33,16 @@
 {%- else -%}
 {%- set state, label = 'is-standby', 'STANDBY' -%}
 {%- endif -%}
-<p id="ntr-onair" hx-swap-oob="true" class="ntr-onair {{ state }}" aria-label="{{ label }}">
-    <span class="ntr-onair-dot" aria-hidden="true"></span>
-    <span class="ntr-onair-label">{{ label }}</span>
+<p id="suite-onair" hx-swap-oob="true" class="suite-onair {{ state }}" aria-label="{{ label }}">
+    <span class="suite-onair-dot" aria-hidden="true"></span>
+    <span class="suite-onair-label">{{ label }}</span>
 </p>
 {% endmacro %}
 
 {% macro cue_line(label, item) %}
-<div class="ntr-cue">
-    <span class="ntr-cue-label">{{ label }}</span>
-    <span class="ntr-cue-value">
+<div class="suite-cue">
+    <span class="suite-cue-label">{{ label }}</span>
+    <span class="suite-cue-value">
         {%- if not item or item.rid == -1 -%}
         —
         {%- else -%}
@@ -62,10 +62,10 @@
 
 {% macro nowplayling(data, remaining) %}
 {{ onair_banner(data.source) }}
-<div class="ntr-desk {% if 5 >= remaining and remaining > 0 %}ntr-desk--ending{% endif %}">
-    <div class="ntr-desk-toolbar">
+<div class="suite-desk {% if 5 >= remaining and remaining > 0 %}suite-desk--ending{% endif %}">
+    <div class="suite-desk-toolbar">
         <span id="skipbutton" hx-preserve></span>
-        <div class="ntr-clock">
+        <div class="suite-clock">
             {# two separated spans because "date" is very stable, so reading time will be faster in screenreaders #}
             <span role="timer" aria-label="date">
                 {{ data.date }}
@@ -75,28 +75,28 @@
             </span>
         </div>
     </div>
-    <div class="ntr-nowplaying">
-        <p class="ntr-nowplaying-artist" role="main">
+    <div class="suite-nowplaying">
+        <p class="suite-nowplaying-artist" role="main">
             {{ data.artist }}
         </p>
         {% if data.title %}
-        <p class="ntr-nowplaying-title">
+        <p class="suite-nowplaying-title">
             {{ data.title }}
         </p>
         {% endif %}
-        <div class="ntr-source-row">
+        <div class="suite-source-row">
             {{ source_badge(data.source) }}
         </div>
-        <div class="ntr-cues" aria-label="File d’attente">
+        <div class="suite-cues" aria-label="File d’attente">
             {{ cue_line("Prochain cart", data.next_cart) }}
             {{ cue_line("Prochain auto-DJ", data.next_autodj) }}
             {{ cue_line("Prochain jingle", data.next_jingle) }}
         </div>
     </div>
-    <div class="ntr-timers">
+    <div class="suite-timers">
         <div>
             {% if data.elapsed %}
-            <span class="ntr-timers-label">Écoulé</span>
+            <span class="suite-timers-label">Écoulé</span>
             <span role="timer" aria-label="écoulé">
                 {{ duration_span(data.elapsed) }}
             </span>
@@ -104,7 +104,7 @@
         </div>
         <div>
             {% if remaining %}
-            <span class="ntr-timers-label">Restant</span>
+            <span class="suite-timers-label">Restant</span>
             <span role="timer" aria-label="restant">
                 −{{ duration_span(remaining) }}
             </span>

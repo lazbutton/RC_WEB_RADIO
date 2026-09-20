@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from radiotomate.domain.autodj import (
     protect_midnight_slot,
@@ -20,7 +20,14 @@ from radiotomate.domain.errors import (
     DomainValidationError,
 )
 from radiotomate.enums import WhenMode
-from radiotomate.models import AutoDJSlot, Cart, Clock, ClockPosition, MusicCategory
+from radiotomate.models import (
+    AutoDJSlot,
+    Cart,
+    Clock,
+    ClockPosition,
+    MusicCategory,
+    RundownItem,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session as ormSession
@@ -122,28 +129,47 @@ async def resolve_cart_ref(
     id_field: str,
     title_field: str,
 ) -> Cart | None:
-    if id_field in data:
-        return await _cart_from_id(session, data.get(id_field), field=id_field)
-    return await _cart_from_title(session, data.get(title_field), field=title_field)
+    title_given = title_field in data
+    title = str(data.get(title_field) or "").strip() if title_given else ""
+    if title_given and not title:
+        return None
+    raw_id = data.get(id_field) if id_field in data else None
+    if raw_id not in {None, ""}:
+        by_id = await _cart_from_id(session, raw_id, field=id_field)
+        if not title_given or by_id.title.strip().lower() == title.lower():
+            return by_id
+    if title:
+        return await _cart_from_title(session, title, field=title_field)
+    return None
 
 
-async def _make_position(
+def _position_id(data: dict) -> int | None:
+    raw = data.get("id")
+    if raw in {None, ""}:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _fill_position(
     session: ormSession,
+    position: ClockPosition,
     data: dict,
     when_mode: str,
     sort_order: int,
-) -> ClockPosition:
+) -> None:
     kind, minute, sync = validate_position(data, when_mode)
-    category_id = None
-    category_name = data.get("category")
+    category = None
+    category_name = str(data.get("category") or "").strip()
     if category_name:
-        category = await MusicCategory.from_name(session, str(category_name))
+        category = await MusicCategory.from_name(session, category_name)
         if category is None:
             raise DomainValidationError(
                 f"unknown category: {category_name}",
                 field="category",
             )
-        category_id = category.id
     cart = await resolve_cart_ref(
         session,
         data,
@@ -156,18 +182,30 @@ async def _make_position(
         id_field="fallback_cart_id",
         title_field="fallback_cart",
     )
-    return ClockPosition(
-        sort_order=sort_order,
-        kind=kind,
-        when_mode=when_mode,
-        minute=minute,
-        sync=sync,
-        category_id=category_id,
-        cart_id=cart.id if cart else None,
-        cart_title=cart.title if cart else None,
-        fallback_cart_id=fallback.id if fallback else None,
-        fallback_cart_title=fallback.title if fallback else None,
-    )
+    position.sort_order = sort_order
+    position.kind = kind
+    position.when_mode = when_mode
+    position.minute = minute
+    position.sync = sync
+    position.category = category
+    position.category_id = category.id if category else None
+    position.cart = cart
+    position.cart_id = cart.id if cart else None
+    position.cart_title = cart.title if cart else None
+    position.fallback_cart = fallback
+    position.fallback_cart_id = fallback.id if fallback else None
+    position.fallback_cart_title = fallback.title if fallback else None
+
+
+async def _make_position(
+    session: ormSession,
+    data: dict,
+    when_mode: str,
+    sort_order: int,
+) -> ClockPosition:
+    position = ClockPosition()
+    await _fill_position(session, position, data, when_mode, sort_order)
+    return position
 
 
 async def apply_clock(
@@ -203,27 +241,59 @@ async def apply_clock(
             data.get("anchors") or [],
         )
         await clock.awaitable_attrs.positions
-        clock.positions.clear()
-        await session.flush()
-        for order, row in enumerate(motif):
-            clock.positions.append(
-                await _make_position(
-                    session,
-                    row,
-                    WhenMode.SEQUENTIAL.value,
-                    order,
-                )
+        by_id = {
+            pos.id: pos
+            for pos in clock.positions
+            if pos.id is not None and pos.clock_id == clock.id
+        }
+        kept_rows: list[ClockPosition] = []
+        claimed: set[int] = set()
+        order = 0
+        groups = (
+            (WhenMode.SEQUENTIAL.value, motif),
+            (WhenMode.ANCHORED.value, anchors),
+        )
+        for when_mode, rows in groups:
+            for row in rows:
+                pos_id = _position_id(row)
+                current = by_id.get(pos_id) if pos_id is not None else None
+                if current is not None and current.id in claimed:
+                    current = None
+                if current is None:
+                    current = next(
+                        (
+                            pos
+                            for pos in clock.positions
+                            if pos.id is not None
+                            and pos.id not in claimed
+                            and pos.when_mode == when_mode
+                        ),
+                        None,
+                    )
+                if current is None:
+                    current = await _make_position(session, row, when_mode, order)
+                    clock.positions.append(current)
+                else:
+                    await _fill_position(session, current, row, when_mode, order)
+                if current.id is not None:
+                    claimed.add(current.id)
+                kept_rows.append(current)
+                order += 1
+        dropped_ids = [
+            pos.id
+            for pos in clock.positions
+            if pos not in kept_rows and pos.id is not None
+        ]
+        if dropped_ids:
+            await session.execute(
+                update(RundownItem)
+                .where(RundownItem.clock_position_id.in_(dropped_ids))
+                .values(clock_position_id=None)
             )
-        offset = len(motif)
-        for order, row in enumerate(anchors, start=offset):
-            clock.positions.append(
-                await _make_position(
-                    session,
-                    row,
-                    WhenMode.ANCHORED.value,
-                    order,
-                )
-            )
+            await session.flush()
+        for pos in list(clock.positions):
+            if pos not in kept_rows:
+                clock.positions.remove(pos)
     return clock
 
 

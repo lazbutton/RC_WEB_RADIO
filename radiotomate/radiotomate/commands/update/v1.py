@@ -105,7 +105,7 @@ async def upgrade(conn):
         await conn.execute(q, {"key": "SCHEMA_VERSION", "value": "1"})
 
     default_settings = {
-        "INTERFACE_NAME": "New Trad Radio",
+        "INTERFACE_NAME": "BUTTON",
     }
     q = text("""INSERT INTO settings (key, value) VALUES (:key, :value)""")
     for key, value in default_settings.items():

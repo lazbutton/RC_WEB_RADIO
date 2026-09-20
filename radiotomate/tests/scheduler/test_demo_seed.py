@@ -14,7 +14,7 @@ def test_split_sound_title_strips_index_and_artist():
     )
 
 
-def test_seed_items_from_ntr_radio_data():
+def test_seed_items_from_radio_data():
     root = Path(__file__).resolve().parents[2] / "radio_data"
     if not (root / "radiotomate.db").is_file():
         return

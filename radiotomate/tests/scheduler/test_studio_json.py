@@ -8,6 +8,7 @@ JSON_PATHS = (
     "/autodj/clocks.json",
     "/autodj/slots.json",
     "/autodj/categories.json",
+    "/antenne/emissions.json",
     "/carts.json",
 )
 
@@ -16,7 +17,7 @@ def _interface_client(app_configration: dict, beets_integration: BeetsIntegratio
     from radiotomate.interface_app import app_factory as interface_factory
 
     iface = interface_factory(app_configration, False, beets_integration)
-    iface.config["INTERFACE_NAME"] = "New Trad Radio"
+    iface.config["INTERFACE_NAME"] = "BUTTON"
     return iface.test_client()
 
 
@@ -58,7 +59,7 @@ async def test_studio_json_authenticated(  # noqa: PLR0913
     beets_integration: BeetsIntegration,
     dbsession: ormSession,
     users_password: str,
-    jingles_ntr_cart,
+    jingles_cart,
     pubs_cart,
 ):
     user = User(username="studio-json")
@@ -92,14 +93,14 @@ async def test_studio_json_authenticated(  # noqa: PLR0913
 
     categories = await (await client.get("/autodj/categories.json")).get_json()
     rotation = next(c for c in categories["categories"] if c["name"] == "Rotation")
-    assert rotation["query"] == "grouping:rotation"
+    assert rotation["query"] == "path:/media/10-rotation"
     assert rotation["count"] > 0
 
     carts = await (await client.get("/carts.json")).get_json()
     titles = {c["title"] for c in carts["carts"]}
-    assert "Jingles NTR" in titles
+    assert "Jingles" in titles
     assert "Pubs" in titles
-    jingles = next(c for c in carts["carts"] if c["title"] == "Jingles NTR")
+    jingles = next(c for c in carts["carts"] if c["title"] == "Jingles")
     assert jingles["sounds"]
     assert "path" not in jingles
     assert "path" not in jingles["sounds"][0]

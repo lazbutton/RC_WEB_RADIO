@@ -98,17 +98,21 @@ def reset_clock_sequencer():
     reset_state()
     runtime_metrics.reset()
     Watchdog.liquidsoap_version = "disconnected"
+    from radiotomate.interface.autodj import invalidate_conducteur_cache
+
+    invalidate_conducteur_cache()
     yield
     reset_state()
     runtime_metrics.reset()
     Watchdog.liquidsoap_version = "disconnected"
+    invalidate_conducteur_cache()
 
 
 @pytest.fixture
-async def jingles_ntr_cart(raw_app: CustomQuart, dbsession: ormSession) -> Cart:
-    cartpath = raw_app.config["DATA_ROOT"] / "jingles-ntr"
+async def jingles_cart(raw_app: CustomQuart, dbsession: ormSession) -> Cart:
+    cartpath = raw_app.config["DATA_ROOT"] / "jingles"
     cart = Cart(
-        title="Jingles NTR",
+        title="Jingles",
         path=cartpath,
         mode=CartMode.RANDOM,
         schedule_mode=ScheduleMode.JINGLES,
@@ -117,9 +121,9 @@ async def jingles_ntr_cart(raw_app: CustomQuart, dbsession: ormSession) -> Cart:
     await dbsession.flush()
     sound = Sound(
         cart_id=cart.id,
-        path=cartpath / "id-ntr.mp3",
+        path=cartpath / "id-button.mp3",
         duration=8,
-        title="ID NTR",
+        title="ID BUTTON",
         gain=-1.0,
         peak=-0.5,
     )

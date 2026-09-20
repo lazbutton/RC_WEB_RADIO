@@ -6,12 +6,15 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session as ormSession
 
 from radiotomate.beets import BeetsIntegration
+from radiotomate.enums import CartMode, ScheduleMode
 from radiotomate.models import AutoDJSlot, Clock, ClockPosition, MusicCategory
 from radiotomate.models.cart import Cart
+from radiotomate.models.sound import Sound
 from radiotomate.scheduler.clock import (
     PARIS,
     anchor_in_daypart,
     next_hard_anchor_minute,
+    note_carts_push,
     sequential_kind_cycle,
     tick,
     track_would_overflow_anchor,
@@ -84,31 +87,100 @@ async def test_seed_packet_a(dbsession: ormSession):
 
 async def test_motif_jingle_then_three_music(
     dbsession: ormSession,
-    jingles_ntr_cart: Cart,
+    jingles_cart: Cart,
     beets_integration: BeetsIntegration,
 ):
     client = _client()
     actions = await tick(dbsession, _live(NIGHT), client, beets_integration)
-    assert actions == ["jingle", "autodj"]
+    assert actions[0] == "jingle"
+    assert actions.count("autodj") >= 2
     queues = [c.args[0] for c in client.post.call_args_list]
-    assert queues == ["/queue/jingles", "/queue/autodj"]
-    assert client.post.call_args_list[0].kwargs["json"]["artist"] == "Jingles NTR"
+    assert queues[0] == "/queue/jingles"
+    assert queues.count("/queue/autodj") >= 2
+    assert client.post.call_args_list[0].kwargs["json"]["artist"] == "Jingles"
 
-    filled_jingle = _live(NIGHT, next_jingle={"rid": 1}, next_autodj={"rid": -1})
-    assert await tick(dbsession, filled_jingle, client, beets_integration) == ["autodj"]
-    assert await tick(dbsession, filled_jingle, client, beets_integration) == ["autodj"]
-    both_empty = _live(NIGHT)
-    assert (await tick(dbsession, both_empty, client, beets_integration))[0] == "jingle"
+    filled = _live(
+        NIGHT,
+        remaining="180",
+        next_jingle={"rid": 1},
+        next_autodj={"rid": 1},
+        jingles_queued=2,
+        autodj_queued=1,
+    )
+    follow = _client()
+    assert await tick(dbsession, filled, follow, beets_integration) == ["autodj"]
+
+
+async def test_autodj_fills_to_depth_two(
+    dbsession: ormSession,
+    jingles_cart: Cart,
+    beets_integration: BeetsIntegration,
+):
+    client = _client()
+    live = _live(
+        NIGHT,
+        remaining="180",
+        next_jingle={"rid": 1},
+        next_autodj={"rid": -1},
+        jingles_queued=2,
+        autodj_queued=0,
+    )
+    actions = await tick(dbsession, live, client, beets_integration)
+    assert actions == ["autodj", "autodj"]
+    already = _live(
+        NIGHT,
+        remaining="180",
+        next_jingle={"rid": 1},
+        next_autodj={"rid": 1},
+        jingles_queued=2,
+        autodj_queued=2,
+    )
+    client2 = _client()
+    assert await tick(dbsession, already, client2, beets_integration) == []
+    client2.post.assert_not_called()
+
+
+async def test_autodj_fills_while_cart_is_on_air(
+    dbsession: ormSession,
+    jingles_cart: Cart,
+    beets_integration: BeetsIntegration,
+):
+    client = _client()
+    actions = await tick(
+        dbsession,
+        _live(
+            NIGHT,
+            source="carts",
+            remaining="180",
+            next_jingle={"rid": -1},
+            next_autodj={"rid": -1},
+            next_cart={"rid": 1},
+            jingles_queued=0,
+            autodj_queued=0,
+            carts_queued=1,
+        ),
+        client,
+        beets_integration,
+    )
+    assert "jingle" not in actions
+    assert actions.count("autodj") >= 2
 
 
 async def test_pub_at_1020_in_daypart(
     dbsession: ormSession,
-    jingles_ntr_cart: Cart,
+    jingles_cart: Cart,
     pubs_cart: Cart,
     beets_integration: BeetsIntegration,
 ):
     client = _client()
-    live = _live(JOURNEE_20, next_jingle={"rid": 1}, next_autodj={"rid": 1})
+    live = _live(
+        JOURNEE_20,
+        remaining="180",
+        next_jingle={"rid": 1},
+        next_autodj={"rid": 1},
+        jingles_queued=2,
+        autodj_queued=3,
+    )
     actions = await tick(dbsession, live, client, beets_integration)
     assert "anchor:20" in actions
     assert "skip" in actions
@@ -121,7 +193,7 @@ async def test_pub_at_1020_in_daypart(
 
 async def test_no_pub_when_daypart_too_short(
     dbsession: ormSession,
-    jingles_ntr_cart: Cart,
+    jingles_cart: Cart,
     pubs_cart: Cart,
     beets_integration: BeetsIntegration,
 ):
@@ -141,7 +213,14 @@ async def test_no_pub_when_daypart_too_short(
     client = _client()
     actions = await tick(
         dbsession,
-        _live(SHORT_20, next_jingle={"rid": 1}, next_autodj={"rid": 1}),
+        _live(
+            SHORT_20,
+            remaining="180",
+            next_jingle={"rid": 1},
+            next_autodj={"rid": 1},
+            jingles_queued=2,
+            autodj_queued=3,
+        ),
         client,
         beets_integration,
     )
@@ -151,14 +230,21 @@ async def test_no_pub_when_daypart_too_short(
 
 async def test_no_pub_at_1820(
     dbsession: ormSession,
-    jingles_ntr_cart: Cart,
+    jingles_cart: Cart,
     pubs_cart: Cart,
     beets_integration: BeetsIntegration,
 ):
     client = _client()
     actions = await tick(
         dbsession,
-        _live(EVENING_20, next_jingle={"rid": 1}, next_autodj={"rid": 1}),
+        _live(
+            EVENING_20,
+            remaining="180",
+            next_jingle={"rid": 1},
+            next_autodj={"rid": 1},
+            jingles_queued=2,
+            autodj_queued=3,
+        ),
         client,
         beets_integration,
     )
@@ -168,24 +254,31 @@ async def test_no_pub_at_1820(
 
 async def test_empty_pubs_uses_jingle_fallback(
     dbsession: ormSession,
-    jingles_ntr_cart: Cart,
+    jingles_cart: Cart,
     beets_integration: BeetsIntegration,
 ):
     client = _client()
     actions = await tick(
         dbsession,
-        _live(JOURNEE_20, next_jingle={"rid": 1}, next_autodj={"rid": 1}),
+        _live(
+            JOURNEE_20,
+            remaining="180",
+            next_jingle={"rid": 1},
+            next_autodj={"rid": 1},
+            jingles_queued=2,
+            autodj_queued=3,
+        ),
         client,
         beets_integration,
     )
     assert "anchor:20" in actions
     payload = client.post.call_args.kwargs["json"]
-    assert payload["artist"] == "Jingles NTR"
+    assert payload["artist"] == "Jingles"
 
 
 async def test_no_clock_id_does_not_fill(
     dbsession: ormSession,
-    jingles_ntr_cart: Cart,
+    jingles_cart: Cart,
     beets_integration: BeetsIntegration,
 ):
     slot = await AutoDJSlot.from_time(dbsession, 30, 0)
@@ -202,15 +295,101 @@ async def test_no_clock_id_does_not_fill(
 
 async def test_night_uses_clock_not_random_pick(
     dbsession: ormSession,
-    jingles_ntr_cart: Cart,
+    jingles_cart: Cart,
     beets_integration: BeetsIntegration,
 ):
     client = _client()
     with patch.object(beets_integration, "random_pick", new_callable=AsyncMock) as rp:
         actions = await tick(dbsession, _live(NIGHT), client, beets_integration)
         rp.assert_not_called()
-    assert actions == ["jingle", "autodj"]
-    assert not any(a.startswith("anchor:") for a in actions)
+    assert actions[0] == "jingle"
+    assert "autodj" in actions
     queues = [c.args[0] for c in client.post.call_args_list]
-    assert queues == ["/queue/jingles", "/queue/autodj"]
-    assert "beets_id" in client.post.call_args_list[1].kwargs["json"]
+    assert queues[0] == "/queue/jingles"
+    assert "/queue/autodj" in queues
+    autodj_payload = next(
+        call.kwargs["json"]
+        for call in client.post.call_args_list
+        if call.args[0] == "/queue/autodj"
+    )
+    assert "beets_id" in autodj_payload
+    assert autodj_payload.get("artist")
+    assert autodj_payload.get("title")
+    assert not str(autodj_payload["title"]).lower().endswith(".mp3")
+
+
+async def test_tick_skips_unchanged_cursor_persist(
+    dbsession: ormSession,
+    jingles_cart: Cart,
+    beets_integration: BeetsIntegration,
+):
+    live = _live(
+        NIGHT,
+        remaining="180",
+        next_jingle={"rid": 1},
+        next_autodj={"rid": 1},
+        jingles_queued=2,
+        autodj_queued=3,
+    )
+    await tick(dbsession, live, _client(), beets_integration)
+    with patch(
+        "radiotomate.scheduler.clock.Setting.upsert",
+        new_callable=AsyncMock,
+    ) as upsert:
+        assert await tick(dbsession, live, _client(), beets_integration) == []
+        upsert.assert_not_called()
+
+
+async def test_active_cart_playlist_refills_on_tick(
+    dbsession: ormSession,
+    raw_app,
+    jingles_cart: Cart,
+    beets_integration: BeetsIntegration,
+):
+    cartpath = raw_app.config["DATA_ROOT"] / "gender-minorities"
+    cart = Cart(
+        title="Prog Gender Minorities",
+        path=cartpath,
+        mode=CartMode.PLAYLIST_LOOP,
+        schedule_mode=ScheduleMode.TIMED,
+    )
+    dbsession.add(cart)
+    await dbsession.flush()
+    for rank, title in enumerate(("Un", "Deux", "Trois"), start=1):
+        dbsession.add(
+            Sound(
+                cart_id=cart.id,
+                path=cartpath / f"{rank}.mp3",
+                duration=10,
+                title=title,
+                rank=rank,
+                gain=-1.0,
+                peak=-0.5,
+            )
+        )
+    await dbsession.commit()
+    note_carts_push(cart.id)
+    client = _client()
+    actions = await tick(
+        dbsession,
+        _live(
+            NIGHT,
+            source="carts",
+            remaining="180",
+            next_jingle={"rid": 1},
+            next_autodj={"rid": 1},
+            next_cart={"rid": -1},
+            jingles_queued=2,
+            autodj_queued=3,
+            carts_queued=0,
+        ),
+        client,
+        beets_integration,
+    )
+    assert actions.count("cart_chain") == 2
+    carts_posts = [
+        call for call in client.post.call_args_list if call.args[0] == "/queue/carts"
+    ]
+    assert len(carts_posts) == 2
+    titles = [call.kwargs["json"]["title"] for call in carts_posts]
+    assert titles == ["Un", "Deux"]

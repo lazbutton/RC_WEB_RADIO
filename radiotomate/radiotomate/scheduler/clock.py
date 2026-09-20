@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
-from radiotomate.enums import PlayoutAction, PositionKind, RundownStatus
+from radiotomate.enums import CartMode, PlayoutAction, PositionKind, RundownStatus
 from radiotomate.models import (
     AutoDJSlot,
     Cart,
@@ -53,6 +53,10 @@ TITLE_LAST_N = 20
 JINGLE_PREEMPT_REMAINING = 3.0
 SETTING_CLOCK_SEQ_CURSOR = "clock_seq_cursor"
 SETTING_CLOCK_SEQ_CLOCK_ID = "clock_seq_clock_id"
+SETTING_CLOCK_SEQ_EPOCH = "clock_seq_epoch"
+TARGET_QUEUE_DEPTH = 2
+AUTODJ_BURST_REMAINING = 8.0
+AUTODJ_BURST_DEPTH = 3
 
 
 @dataclass
@@ -60,16 +64,29 @@ class SequencerState:
     cursor: int = 0
     clock_id: int | None = None
     fired_anchors: set[tuple[str, int, int]] = field(default_factory=set)
+    restored: bool = False
+    persisted_snapshot: tuple[int, int | None, frozenset] | None = None
+    active_cart_id: int | None = None
+    epoch: int = 0
 
 
 _state = SequencerState()
 
 
 def reset_state() -> None:
-    """Reset in-memory cursor (tests)."""
+    """Reset in-memory cursor (tests and producer reset)."""
     _state.cursor = 0
     _state.clock_id = None
     _state.fired_anchors.clear()
+    _state.restored = False
+    _state.persisted_snapshot = None
+    _state.active_cart_id = None
+    _state.epoch = 0
+
+
+def note_carts_push(cart_id: int) -> None:
+    """Remember which cart currently owns the carts Liquidsoap queue."""
+    _state.active_cart_id = cart_id
 
 
 def now_paris(now: datetime | None = None) -> datetime:
@@ -97,6 +114,16 @@ def queue_empty(live_data: dict, key: str) -> bool:
     if not isinstance(nxt, dict):
         return False
     return nxt.get("rid") == -1
+
+
+def queued_count(live_data: dict, queued_key: str, cue_key: str) -> int:
+    raw = live_data.get(queued_key)
+    if raw is not None and raw != "":
+        try:
+            return max(0, int(raw))
+        except (TypeError, ValueError):
+            pass
+    return 0 if queue_empty(live_data, cue_key) else 1
 
 
 def remaining_seconds(live_data: dict) -> float:
@@ -187,28 +214,97 @@ def _next_anchor(
     return soonest, soonest_pos
 
 
-async def persist_sequencer_cursor(session: ormSession) -> None:
+def _session_engine(session: ormSession):
+    bind = session.get_bind()
+    return getattr(bind, "engine", bind)
+
+
+async def load_sequencer_epoch(session: ormSession) -> int:
+    row = await Setting.from_key(session, SETTING_CLOCK_SEQ_EPOCH)
+    if row is None or row.value in {"", None}:
+        return 0
+    try:
+        return max(0, int(row.value))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def peek_committed_epoch(session: ormSession) -> int:
+    """Read epoch from a fresh connection so a producer reset wins over this tick."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    engine = _session_engine(session)
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as probe:
+            return await load_sequencer_epoch(probe)
+    except Exception:
+        return await load_sequencer_epoch(session)
+
+
+async def persist_sequencer_cursor(
+    session: ormSession,
+    *,
+    commit: bool = True,
+) -> None:
     """Write in-memory cursor so the interface can preview without the scheduler."""
     from radiotomate.scheduler.execution import persist_fired_anchors
 
+    committed_epoch = await peek_committed_epoch(session)
+    if _state.restored and committed_epoch != _state.epoch:
+        _state.restored = False
+        _state.epoch = committed_epoch
+        return
+    snapshot = (_state.cursor, _state.clock_id, frozenset(_state.fired_anchors))
+    if snapshot == _state.persisted_snapshot:
+        return
     await Setting.upsert(session, SETTING_CLOCK_SEQ_CURSOR, str(_state.cursor))
     clock_id = "" if _state.clock_id is None else str(_state.clock_id)
     await Setting.upsert(session, SETTING_CLOCK_SEQ_CLOCK_ID, clock_id)
     await persist_fired_anchors(session, _state.fired_anchors)
-    await session.commit()
+    if commit:
+        await session.commit()
+    _state.persisted_snapshot = snapshot
 
 
-async def restore_sequencer_state(session: ormSession) -> None:
-    """Reload cursor and fired anchors after a process restart."""
+async def restore_sequencer_state(
+    session: ormSession,
+    *,
+    force: bool = False,
+) -> None:
+    """Reload cursor and fired anchors after a restart or producer reset."""
     from radiotomate.scheduler.execution import load_fired_anchors
 
-    if _state.fired_anchors:
+    epoch = await load_sequencer_epoch(session)
+    if _state.restored and not force and _state.epoch == epoch:
         return
     _state.fired_anchors = await load_fired_anchors(session)
     cursor, clock_id = await load_sequencer_cursor(session)
-    if _state.clock_id is None:
-        _state.cursor = cursor
-        _state.clock_id = clock_id
+    _state.cursor = cursor
+    _state.clock_id = clock_id
+    _state.epoch = epoch
+    _state.persisted_snapshot = (
+        _state.cursor,
+        _state.clock_id,
+        frozenset(_state.fired_anchors),
+    )
+    _state.restored = True
+
+
+async def reset_sequencer(session: ormSession, *, commit: bool = True) -> None:
+    """Start the motif at position 0 and bump epoch so the scheduler process follows."""
+    from radiotomate.scheduler.execution import persist_fired_anchors
+
+    epoch = await load_sequencer_epoch(session) + 1
+    reset_state()
+    _state.epoch = epoch
+    _state.restored = True
+    _state.persisted_snapshot = (0, None, frozenset())
+    await Setting.upsert(session, SETTING_CLOCK_SEQ_EPOCH, str(epoch))
+    await Setting.upsert(session, SETTING_CLOCK_SEQ_CURSOR, "0")
+    await Setting.upsert(session, SETTING_CLOCK_SEQ_CLOCK_ID, "")
+    await persist_fired_anchors(session, set())
+    if commit:
+        await session.commit()
 
 
 async def advance_sequencer_cursor(session: ormSession) -> None:
@@ -289,7 +385,9 @@ async def tick(  # noqa: PLR0912, PLR0915
     await restore_sequencer_state(session)
     from radiotomate.scheduler.outbox import dispatch_pending_commands
 
-    await dispatch_pending_commands(session, gateway_for(playout_client))
+    gateway = gateway_for(playout_client)
+    await dispatch_pending_commands(session, gateway)
+    await _refill_active_cart(session, live_data, gateway, actions)
     minute_of_day = now.hour * 60 + now.minute
     slot = await AutoDJSlot.from_time(session, minute_of_day, now.weekday())
     if slot is None or not slot.clock_id:
@@ -298,11 +396,13 @@ async def tick(  # noqa: PLR0912, PLR0915
             minute_of_day,
             now.weekday(),
         )
+        await persist_sequencer_cursor(session)
         return _finish_tick(started, actions)
 
     clock = await Clock.from_id(session, slot.clock_id)
     if clock is None:
         _log.warning("Clock %s missing; not filling queues", slot.clock_id)
+        await persist_sequencer_cursor(session)
         return _finish_tick(started, actions)
 
     if _state.clock_id != clock.id:
@@ -315,7 +415,6 @@ async def tick(  # noqa: PLR0912, PLR0915
     nxt = await AutoDJSlot.next_after(session, slot)
     slot_end = slot.daypart_end_minute(nxt)
 
-    gateway = gateway_for(playout_client)
     await _fire_due_anchors(
         session,
         live_data,
@@ -344,14 +443,27 @@ async def tick(  # noqa: PLR0912, PLR0915
 
     anchored = clock.anchored_positions()
     next_anchor = next_hard_anchor_minute(now, slot.minute, slot_end, anchored)
+    jingles_q = queued_count(live_data, "jingles_queued", "next_jingle")
+    autodj_q = queued_count(live_data, "autodj_queued", "next_autodj")
+    autodj_target = (
+        AUTODJ_BURST_DEPTH
+        if remaining_seconds(live_data) < AUTODJ_BURST_REMAINING
+        else TARGET_QUEUE_DEPTH
+    )
 
-    for _ in range(2):
+    for _ in range(8):
         pos = sequential[_state.cursor % len(sequential)]
         if pos.kind == PositionKind.JINGLE.value:
-            if not queue_empty(live_data, "next_jingle"):
-                break
+            if jingles_q >= TARGET_QUEUE_DEPTH:
+                if autodj_q >= autodj_target:
+                    break
+                _state.cursor += 1
+                continue
             if not can_push_sequential_jingle(live_data):
-                break
+                if autodj_q >= autodj_target:
+                    break
+                _state.cursor += 1
+                continue
             pushed = await _push_cart_to_queue(
                 session,
                 gateway,
@@ -362,12 +474,17 @@ async def tick(  # noqa: PLR0912, PLR0915
             if pushed:
                 actions.append("jingle")
                 _state.cursor += 1
+                jingles_q += 1
                 live_data = {**live_data, "next_jingle": {"rid": 1}}
                 continue
-            break
+            _state.cursor += 1
+            continue
         if pos.kind == PositionKind.MUSIQUE.value:
-            if not queue_empty(live_data, "next_autodj"):
-                break
+            if autodj_q >= autodj_target:
+                if jingles_q >= TARGET_QUEUE_DEPTH:
+                    break
+                _state.cursor += 1
+                continue
             item = await _pick_music(session, beets, pos, now)
             if item is None:
                 _log.warning("No Beets track for clock position %s", pos.id)
@@ -388,12 +505,16 @@ async def tick(  # noqa: PLR0912, PLR0915
             if ok:
                 actions.append("autodj")
                 _state.cursor += 1
+                autodj_q += 1
                 live_data = {**live_data, "next_autodj": {"rid": 1}}
                 continue
             break
         if pos.kind in {PositionKind.SON.value, PositionKind.PUB.value}:
-            if not queue_empty(live_data, "next_autodj"):
-                break
+            if autodj_q >= autodj_target:
+                if jingles_q >= TARGET_QUEUE_DEPTH:
+                    break
+                _state.cursor += 1
+                continue
             pushed = await _push_cart_to_queue(
                 session,
                 gateway,
@@ -404,12 +525,69 @@ async def tick(  # noqa: PLR0912, PLR0915
             if pushed:
                 actions.append("autodj_cart")
                 _state.cursor += 1
+                autodj_q += 1
                 live_data = {**live_data, "next_autodj": {"rid": 1}}
                 continue
             break
         _state.cursor += 1
     await persist_sequencer_cursor(session)
     return _finish_tick(started, actions)
+
+
+async def _enqueue_cart_sound(
+    session: ormSession,
+    gateway: PlayoutGateway,
+    cart: Cart,
+    sound: Sound,
+) -> bool:
+    queue = cart.playout_queue()
+    result = await gateway.queue(
+        queue,
+        {
+            "path": str(sound.path),
+            "artist": cart.title,
+            "title": sound.title,
+            "radiotomate_sound_id": sound.id,
+            "rg_track_gain": str(sound.gain),
+        },
+    )
+    if not result.ok:
+        _log.error("Cart chain push to %s failed: %s", queue, result.error)
+        return False
+    sound.last_played = datetime.now()
+    if queue == "carts":
+        note_carts_push(cart.id)
+    return True
+
+
+async def _refill_active_cart(
+    session: ormSession,
+    live_data: dict,
+    gateway: PlayoutGateway,
+    actions: list[str],
+) -> None:
+    src = source_id(live_data)
+    carts_q = queued_count(live_data, "carts_queued", "next_cart")
+    if src not in {"carts", "starting", ""} and carts_q <= 0:
+        _state.active_cart_id = None
+        return
+    if _state.active_cart_id is None or carts_q >= TARGET_QUEUE_DEPTH:
+        return
+    cart = await Cart.from_id(session, _state.active_cart_id, load_sounds=True)
+    if cart is None or cart.mode not in {CartMode.PLAYLIST, CartMode.PLAYLIST_LOOP}:
+        return
+    pushed_any = False
+    while carts_q < TARGET_QUEUE_DEPTH:
+        sound = _next_available_sound(cart)
+        if sound is None:
+            break
+        if not await _enqueue_cart_sound(session, gateway, cart, sound):
+            break
+        carts_q += 1
+        pushed_any = True
+        actions.append("cart_chain")
+    if pushed_any:
+        await session.commit()
 
 
 async def _fire_due_anchors(  # noqa: PLR0913
@@ -569,6 +747,9 @@ async def _push_cart_to_queue(  # noqa: PLR0913
             sound.path,
             queue,
         )
+        sound.last_played = datetime.now()
+        if queue == "carts":
+            note_carts_push(cart.id)
         return True
     _log.error("Clock push to %s failed: %s", queue, result.error)
     return False
@@ -594,9 +775,13 @@ def _next_available_sound(cart: Cart | None) -> Sound | None:
     if cart is None:
         return None
     try:
-        return cart.next_sound()
+        sound = cart.next_sound()
     except IndexError:
-        return None
+        sound = None
+    if sound is not None:
+        return sound
+    # Playlist one-shot is exhausted: wrap so clock jingl/pub carts keep filling.
+    return cart.next_sound_playlist_loop()
 
 
 async def _pick_music(  # noqa: PLR0913
@@ -692,6 +877,10 @@ async def _push_autodj_item(
         "beets_id": item.id,
         "rg_track_gain": item.rg_track_gain,
     }
+    if artist:
+        payload["artist"] = artist
+    if title:
+        payload["title"] = title
     rundown_item = await _record_push_item(
         session,
         kind=pos.kind,

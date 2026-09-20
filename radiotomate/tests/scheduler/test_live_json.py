@@ -33,6 +33,23 @@ def test_normalize_live_cues_and_simulating():
     assert payload["next_cart"]["title"] == "Spot"
 
 
+def test_normalize_live_ignores_initial_track_mark():
+    payload = live_mod.normalize_live(
+        {
+            "status": "playing",
+            "source": "INSERT_INITIAL_TRACK_MARK",
+            "title": "dummy",
+            "jingles_queued": "2",
+            "autodj_queued": "3",
+            "carts_queued": "1",
+        }
+    )
+    assert payload["source"] == ""
+    assert payload["jingles_queued"] == 2
+    assert payload["autodj_queued"] == 3
+    assert payload["carts_queued"] == 1
+
+
 async def test_live_json_unauthenticated(
     raw_app,
     app_configration: dict,
@@ -70,7 +87,7 @@ async def test_live_json_offline_and_snapshot(
             {
                 "status": "playing",
                 "source": "autodj",
-                "artist": "NTR",
+                "artist": "BUTTON",
                 "title": "On air",
                 "remaining": 8,
                 "elapsed": 2,
@@ -133,7 +150,7 @@ async def test_push_now_json_404_and_200(  # noqa: PLR0913
     beets_integration: BeetsIntegration,
     dbsession: ormSession,
     users_password: str,
-    jingles_ntr_cart,
+    jingles_cart,
 ):
     user = User(username="live-json-fire")
     user.update_password(users_password)
@@ -149,10 +166,10 @@ async def test_push_now_json_404_and_200(  # noqa: PLR0913
     mock = MagicMock()
     mock.push_cart = AsyncMock()
     with patch.object(Scheduler, "get", return_value=mock):
-        ok = await client.post(f"/carts/{jingles_ntr_cart.id}/now.json")
+        ok = await client.post(f"/carts/{jingles_cart.id}/now.json")
     assert ok.status_code == 200
     assert (await ok.get_json())["ok"] is True
-    mock.push_cart.assert_awaited_once_with(jingles_ntr_cart.id)
+    mock.push_cart.assert_awaited_once_with(jingles_cart.id)
 
 
 async def test_push_sound_now_json(  # noqa: PLR0913
@@ -161,7 +178,7 @@ async def test_push_sound_now_json(  # noqa: PLR0913
     beets_integration: BeetsIntegration,
     dbsession: ormSession,
     users_password: str,
-    jingles_ntr_cart,
+    jingles_cart,
 ):
     user = User(username="live-json-pad")
     user.update_password(users_password)
@@ -169,21 +186,21 @@ async def test_push_sound_now_json(  # noqa: PLR0913
     dbsession.add(user)
     await dbsession.commit()
     sound = await dbsession.scalar(
-        select(Sound).where(Sound.cart_id == jingles_ntr_cart.id)
+        select(Sound).where(Sound.cart_id == jingles_cart.id)
     )
     assert sound is not None
     client = _interface_client(app_configration, beets_integration)
     await _login(client, "live-json-pad", users_password)
 
-    missing = await client.post(f"/carts/{jingles_ntr_cart.id}/sounds/99999/now.json")
+    missing = await client.post(f"/carts/{jingles_cart.id}/sounds/99999/now.json")
     assert missing.status_code == 404
 
     mock = MagicMock()
     mock.push_sound = AsyncMock()
     with patch.object(Scheduler, "get", return_value=mock):
         ok = await client.post(
-            f"/carts/{jingles_ntr_cart.id}/sounds/{sound.id}/now.json",
+            f"/carts/{jingles_cart.id}/sounds/{sound.id}/now.json",
         )
     assert ok.status_code == 200
     assert (await ok.get_json())["ok"] is True
-    mock.push_sound.assert_awaited_once_with(jingles_ntr_cart.id, sound.id)
+    mock.push_sound.assert_awaited_once_with(jingles_cart.id, sound.id)

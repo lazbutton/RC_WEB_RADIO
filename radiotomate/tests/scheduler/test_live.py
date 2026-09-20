@@ -48,10 +48,10 @@ def fake_md() -> dict:
 async def test_react_to_empty_jingle_queue(
     raw_app: CustomQuart,
     dbsession: ormSession,
-    jingles_ntr_cart: Cart,
+    jingles_cart: Cart,
     auth: dict,
 ):
-    "normal case: clock motif pushes Jingles NTR"
+    "normal case: clock motif pushes Jingles"
     with patch(
         "httpx.AsyncClient.post",
         return_value=httpx.Response(200, json={"OK": 1}),
@@ -70,13 +70,13 @@ async def test_react_to_empty_jingle_queue(
         jingle = next(
             c for c in mock_liquidsoap.call_args_list if c.args[0] == "/queue/jingles"
         )
-        assert jingle.kwargs["json"]["artist"] == "Jingles NTR"
+        assert jingle.kwargs["json"]["artist"] == "Jingles"
 
 
 async def test_react_to_empty_jingle_queue_robust(
     raw_app: CustomQuart,
     dbsession: ormSession,
-    jingles_ntr_cart: Cart,
+    jingles_cart: Cart,
     auth: dict,
 ):
     "No jingle is enabled: should not crash"
@@ -85,7 +85,7 @@ async def test_react_to_empty_jingle_queue_robust(
     from radiotomate.models.sound import Sound as SoundModel
 
     sound = await dbsession.scalar(
-        sel(SoundModel).filter(SoundModel.cart_id == jingles_ntr_cart.id)
+        sel(SoundModel).filter(SoundModel.cart_id == jingles_cart.id)
     )
     sound.active = False
     await dbsession.commit()
@@ -103,13 +103,14 @@ async def test_react_to_empty_jingle_queue_robust(
             result_text = (await result.data).decode()
             assert result.status_code == 200, "got non-OK response:" + result_text
             await asyncio.sleep(0.05)
-        mock_liquidsoap.assert_not_called()
+        queues = [c.args[0] for c in mock_liquidsoap.call_args_list]
+        assert "/queue/jingles" not in queues
 
 
 async def test_react_to_empty_jingle_queue_but_analyzing(
     raw_app: CustomQuart,
     dbsession: ormSession,
-    jingles_ntr_cart: Cart,
+    jingles_cart: Cart,
     auth: dict,
 ):
     """
@@ -130,7 +131,7 @@ async def test_react_to_empty_jingle_queue_but_analyzing(
             await asyncio.sleep(0.15)
             await dbsession.execute(
                 update(SoundModel)
-                .where(SoundModel.cart_id == jingles_ntr_cart.id)
+                .where(SoundModel.cart_id == jingles_cart.id)
                 .values(gain=None)
             )
             await dbsession.commit()
@@ -143,12 +144,13 @@ async def test_react_to_empty_jingle_queue_but_analyzing(
             result_text = (await result.data).decode()
             assert result.status_code == 200, "got non-OK response:" + result_text
             await asyncio.sleep(0.05)
-        mock_liquidsoap.assert_not_called()
+        queues = [c.args[0] for c in mock_liquidsoap.call_args_list]
+        assert "/queue/jingles" not in queues
 
 
 async def test_react_to_empty_music_queue(
     raw_app: CustomQuart,
-    jingles_ntr_cart: Cart,
+    jingles_cart: Cart,
     auth: dict,
 ):
     with patch(

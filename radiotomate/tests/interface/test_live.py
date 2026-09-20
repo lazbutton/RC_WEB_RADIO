@@ -18,7 +18,7 @@ async def test_live(admin_page: Page):
     await page.get_by_role("button", name="Passer le morceau").click()
     await page.dialog_click("Oui")
     await expect(page.get_by_role("main")).not_to_contain_text(currently_playing)
-    await expect(page.locator("#ntr-onair")).to_have_class(
+    await expect(page.locator("#suite-onair")).to_have_class(
         re_compile(r"is-(live|auto|cart)")
     )
     await expect(page.get_by_text("Prochain cart")).to_be_visible()

@@ -9,6 +9,7 @@ Python objects. They can implement methods, but should not ``commit`` (at most,
 from radiotomate.models.autodj_slot import AutoDJSlot
 from radiotomate.models.cart import Cart
 from radiotomate.models.clock import Clock, ClockPosition
+from radiotomate.models.emission import Emission
 from radiotomate.models.execution import (
     PlayoutCommand,
     ProgrammingVersion,
@@ -26,6 +27,7 @@ __all__ = [
     "Cart",
     "Clock",
     "ClockPosition",
+    "Emission",
     "LoggedOutUser",
     "MetadataLog",
     "MusicCategory",

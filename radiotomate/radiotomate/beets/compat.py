@@ -9,7 +9,7 @@ from __future__ import annotations
 def patch_beets_term_ioctl() -> None:
     import fcntl
 
-    if getattr(fcntl.ioctl, "_ntr_padded", False):
+    if getattr(fcntl.ioctl, "_compat_padded", False):
         return
 
     real_ioctl = fcntl.ioctl
@@ -28,5 +28,5 @@ def patch_beets_term_ioctl() -> None:
                 return out[: len(arg)]
             raise
 
-    ioctl._ntr_padded = True  # type: ignore[attr-defined]
+    ioctl._compat_padded = True  # type: ignore[attr-defined]
     fcntl.ioctl = ioctl  # type: ignore[method-assign]

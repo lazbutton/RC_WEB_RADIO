@@ -4,14 +4,14 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>{% block title %}{% endblock %} — New Trad Radio</title>
-        <link rel="icon" type="image/svg+xml" href="{{ url_for("static", filename="logo-ntr.svg") }}">
+        <title>{% block title %}{% endblock %} — {{ config['INTERFACE_NAME'] }}</title>
+        <link rel="icon" type="image/svg+xml" href="{{ url_for("static", filename="logo.svg") }}">
         <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for("static", filename="logo/favicon-32x32.png") }}">
         <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for("static", filename="logo/favicon-16x16.png") }}">
         <link rel="shortcut icon" href="{{ url_for("static", filename="favicon.ico") }}"/>
         <link href="{{ url_for("static", filename="AtkinsonHyperlegible/AtkinsonHyperlegible.css") }}" rel="stylesheet">
         <link href="{{ url_for("static", filename="radiotomate.css") }}" rel="stylesheet">
-        <link href="{{ url_for("static", filename="ntr.css") }}" rel="stylesheet">
+        <link href="{{ url_for("static", filename="suite.css") }}" rel="stylesheet">
         {% if current_user.is_authenticated %}
         <meta name="csrf-token" content="{{ csrf_token() }}">
         {% endif %}
@@ -20,26 +20,26 @@
         <script defer src="{{ url_for("static", filename="sweetalert2-11.7.31.js") }}"></script>
         <script defer src="{{ url_for("static", filename="alpinejs-3.13.0.min.js") }}"></script>
     </head>
-    <body class="ntr-body{% if current_user.is_authenticated %} ntr-console{% else %} ntr-guest{% endif %}"
+    <body class="suite-body{% if current_user.is_authenticated %} suite-console{% else %} suite-guest{% endif %}"
         x-data="{ sidebarOpen: false }"
         >
 
         {% if current_user.is_authenticated %}
-        <div class="ntr-sidebar-backdrop"
+        <div class="suite-sidebar-backdrop"
             :class="{ 'is-visible': sidebarOpen }"
             @click="sidebarOpen = false"
             ></div>
 
-        <aside class="ntr-sidebar" :class="{ 'is-open': sidebarOpen }" aria-label="Navigation antenne">
-            <a class="ntr-brand" href="{{ url_for('home.index') }}">
-                <img src="{{ url_for("static", filename="logo-ntr.svg") }}" alt="">
-                <span class="ntr-brand-text">
-                    <span class="ntr-brand-name">{{ config['INTERFACE_NAME'] }}</span>
-                    <span class="ntr-brand-sub">Console d’antenne</span>
+        <aside class="suite-sidebar" :class="{ 'is-open': sidebarOpen }" aria-label="Navigation antenne">
+            <a class="suite-brand" href="{{ url_for('home.index') }}">
+                <img src="{{ url_for("static", filename="logo.svg") }}" alt="">
+                <span class="suite-brand-text">
+                    <span class="suite-brand-name">{{ config['INTERFACE_NAME'] }}</span>
+                    <span class="suite-brand-sub">{{ config.get('SUITE_SUBTITLE', 'Console d’antenne') }}</span>
                 </span>
             </a>
 
-            <nav class="ntr-nav" aria-label="Console">
+            <nav class="suite-nav" aria-label="Console">
                 {{ menu_item("home.index", "Antenne", in_blueprint('home')) }}
                 {{ menu_item("carts.index", "Carts", in_blueprint('carts')) }}
                 {{ menu_item("autodj.index", "Auto-DJ", in_blueprint('autodj') and request.endpoint and 'conducteur' not in request.endpoint) }}
@@ -47,20 +47,20 @@
                 {% if current_user.user.can_admin() %}
                     {{ menu_item("users.index", "Comptes", in_blueprint('users')) }}
                 {% endif %}
-                <div class="ntr-sidebar-foot">
-                    <p class="ntr-sidebar-user">{{ current_user.user.username }}</p>
+                <div class="suite-sidebar-foot">
+                    <p class="suite-sidebar-user">{{ current_user.user.username }}</p>
                     {{ menu_item("account.index", "Mon compte", in_blueprint('account')) }}
-                    <a class="ntr-nav-item ntr-nav-item--quiet" href="{{ url_for('login.log_out') }}">
+                    <a class="suite-nav-item suite-nav-item--quiet" href="{{ url_for('login.log_out') }}">
                         Déconnexion
                     </a>
                 </div>
             </nav>
         </aside>
 
-        <div class="ntr-workspace">
-            <header class="ntr-topbar">
+        <div class="suite-workspace">
+            <header class="suite-topbar">
                 <button type="button"
-                    class="ntr-menu-toggle"
+                    class="suite-menu-toggle"
                     aria-label="Ouvrir le menu"
                     :aria-expanded="sidebarOpen.toString()"
                     @click="sidebarOpen = !sidebarOpen"
@@ -69,16 +69,16 @@
                     <span></span>
                     <span></span>
                 </button>
-                <p id="ntr-onair" class="ntr-onair is-standby" aria-label="STANDBY">
-                    <span class="ntr-onair-dot" aria-hidden="true"></span>
-                    <span class="ntr-onair-label">STANDBY</span>
+                <p id="suite-onair" class="suite-onair is-standby" aria-label="STANDBY">
+                    <span class="suite-onair-dot" aria-hidden="true"></span>
+                    <span class="suite-onair-label">STANDBY</span>
                 </p>
-                <p class="ntr-topbar-title">{{ self.title() }}</p>
-                <p class="ntr-topbar-user">{{ current_user.user.username }}</p>
+                <p class="suite-topbar-title">{{ self.title() }}</p>
+                <p class="suite-topbar-user">{{ current_user.user.username }}</p>
             </header>
-            <div class="ntr-page{% if in_blueprint('home') %} ntr-page--live{% endif %}">
+            <div class="suite-page{% if in_blueprint('home') %} suite-page--live{% endif %}">
         {% else %}
-        <nav class="ntr-guest-nav" aria-label="Console">
+        <nav class="suite-guest-nav" aria-label="Console">
             <a href="{{ url_for('login.log_in') }}" {% if in_blueprint('login') %}aria-current="page"{% endif %}>
                 Connexion
             </a>

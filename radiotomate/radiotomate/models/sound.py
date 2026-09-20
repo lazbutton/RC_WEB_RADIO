@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from pathlib import Path  # noqa: TC003
+from pathlib import Path
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, func, or_, select
 from sqlalchemy.dialects.sqlite import DATETIME
@@ -58,6 +58,25 @@ class Sound(Base):
     @classmethod
     async def from_id(cls, session: Session, sound_id: int) -> Sound | None:
         return await session.scalar(select(Sound).filter(Sound.id == sound_id))
+
+    @classmethod
+    async def from_media_path(cls, session: Session, path: str) -> Sound | None:
+        raw = str(path or "").strip().replace("\\", "/")
+        if not raw:
+            return None
+        exact = await session.scalar(select(Sound).where(Sound.path == Path(raw)))
+        if exact is not None:
+            return exact
+        sounds = list(await session.scalars(select(Sound)))
+        for sound in sounds:
+            stored = str(sound.path or "").replace("\\", "/")
+            if (
+                stored == raw
+                or stored.endswith("/" + raw)
+                or raw.endswith("/" + stored)
+            ):
+                return sound
+        return None
 
     @classmethod
     async def next_rank(cls, session: Session, cart_id: int) -> int:
