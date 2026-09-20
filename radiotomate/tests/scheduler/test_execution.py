@@ -18,8 +18,10 @@ from radiotomate.models import (
 from radiotomate.scheduler.clock import PARIS, reset_state, tick
 from radiotomate.scheduler.execution import (
     SETTING_FIRED_ANCHORS,
+    ensure_forecast,
     materialize_rundown,
     published_rundown,
+    reset_conducteur,
 )
 from radiotomate.scheduler.outbox import dispatch_command, enqueue_command
 from radiotomate.scheduler.playout import PlayoutGateway
@@ -157,6 +159,7 @@ async def test_published_rundown_is_stable_source(
         now=datetime(2026, 9, 15, 10, 19, tzinfo=PARIS),
     )
     assert first["programming_version"] == second["programming_version"]
+    assert [item["id"] for item in first["items"]] == [item["id"] for item in second["items"]]
     assert {item["kind"] for item in first["items"]} == {
         item["kind"] for item in second["items"]
     }
@@ -359,3 +362,93 @@ async def test_as_run_links_rundown_item(
     refreshed = await RundownItem.from_id(dbsession, item.id)
     assert refreshed.status == "on_air"
     assert log.rundown_item_id == item.id
+
+
+async def test_ensure_forecast_keeps_ids_across_calls(
+    dbsession: ormSession,
+    jingles_cart,
+    pubs_cart,
+    beets_integration: BeetsIntegration,
+):
+    now = datetime(2026, 9, 14, 0, 30, tzinfo=PARIS)
+    first = await ensure_forecast(
+        dbsession,
+        beets_integration,
+        now=now,
+        cursor=0,
+    )
+    second = await ensure_forecast(
+        dbsession,
+        beets_integration,
+        now=now,
+        cursor=0,
+    )
+    assert first["items"]
+    assert [item["id"] for item in first["items"]] == [
+        item["id"] for item in second["items"]
+    ]
+    assert [item["path"] for item in first["items"]] == [
+        item["path"] for item in second["items"]
+    ]
+
+
+async def test_tick_pushes_persisted_rundown_path(
+    dbsession: ormSession,
+    jingles_cart,
+    pubs_cart,
+    beets_integration: BeetsIntegration,
+):
+    now = datetime(2026, 9, 14, 0, 30, tzinfo=PARIS)
+    data = await ensure_forecast(
+        dbsession,
+        beets_integration,
+        now=now,
+        cursor=0,
+    )
+    music = next(
+        item
+        for item in data["items"]
+        if item.get("kind") == "musique" and item.get("path")
+    )
+    client = _client()
+    await tick(
+        dbsession,
+        _live(
+            NIGHT,
+            remaining="180",
+            next_jingle={"rid": 1},
+            next_autodj={"rid": -1},
+            jingles_queued=2,
+            autodj_queued=0,
+        ),
+        client,
+        beets_integration,
+    )
+    autodj_paths = [
+        call.kwargs["json"]["path"]
+        for call in client.post.call_args_list
+        if call.args[0] == "/queue/autodj"
+    ]
+    assert autodj_paths
+    assert autodj_paths[0] == music["path"]
+
+
+async def test_reset_conducteur_rebuilds_ids(
+    dbsession: ormSession,
+    jingles_cart,
+    pubs_cart,
+    beets_integration: BeetsIntegration,
+):
+    now = datetime(2026, 9, 14, 0, 30, tzinfo=PARIS)
+    first = await ensure_forecast(
+        dbsession,
+        beets_integration,
+        now=now,
+        cursor=0,
+    )
+    first_ids = {item["id"] for item in first["items"]}
+    payload = await reset_conducteur(dbsession, beets_integration)
+    second_ids = {item["id"] for item in payload["items"]}
+    assert first_ids
+    assert payload["action"] == "reset"
+    assert first_ids.isdisjoint(second_ids)

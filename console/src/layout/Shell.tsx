@@ -22,7 +22,7 @@ const NAV = [
   { to: "/habillage", label: "Habillage", icon: SpeakerLoudIcon },
 ] as const;
 
-const NAV_KEY = "ntr-nav-collapsed";
+const NAV_KEY = "app-nav-collapsed";
 
 function readCollapsed(preferCollapsed: boolean): boolean {
   try {
@@ -66,14 +66,14 @@ export function Shell() {
   }, []);
 
   return (
-    <div className={`ntr-shell${collapsed ? " is-nav-collapsed" : ""}`}>
-      <aside className="ntr-sidebar" id="ntr-sidebar" aria-label="Navigation automate">
-        <div className="ntr-sidebar-head">
-          <Link className="ntr-brand" to="/antenne">
-            <img src="/logo-ntr.svg" alt="" width={32} height={32} />
-            <Flex direction="column" gap="0" className="ntr-brand-text">
+    <div className={`app-shell${collapsed ? " is-nav-collapsed" : ""}`}>
+      <aside className="app-sidebar" id="app-sidebar" aria-label="Navigation automate">
+        <div className="app-sidebar-head">
+          <Link className="app-brand" to="/antenne">
+            <img src="/logo.svg" alt="" width={32} height={32} />
+            <Flex direction="column" gap="0" className="app-brand-text">
               <Text size="2" weight="bold">
-                New Trad Radio
+                BUTTON
               </Text>
               <Text size="1" color="gray">
                 Automate — proto
@@ -86,7 +86,7 @@ export function Shell() {
               color="gray"
               size="1"
               aria-expanded={!collapsed}
-              aria-controls="ntr-sidebar"
+              aria-controls="app-sidebar"
               aria-label={collapsed ? "Déplier le menu" : "Replier le menu"}
               onClick={toggleNav}
             >
@@ -95,7 +95,7 @@ export function Shell() {
           </Tooltip>
         </div>
 
-        <nav className="ntr-nav" aria-label="Console">
+        <nav className="app-nav" aria-label="Console">
           {NAV.map((item) => {
             const link = (
               <NavLink
@@ -105,7 +105,7 @@ export function Shell() {
                 className={({ isActive }) => (isActive ? "is-active" : undefined)}
               >
                 <item.icon />
-                <span className="ntr-nav-label">{item.label}</span>
+                <span className="app-nav-label">{item.label}</span>
               </NavLink>
             );
             return collapsed ? (
@@ -118,18 +118,18 @@ export function Shell() {
           })}
         </nav>
 
-        <div className="ntr-sidebar-foot">
+        <div className="app-sidebar-foot">
           <Text size="1" color="gray">
             Squelette sans données
           </Text>
           <Text size="2" as="p" mt="1">
-            ntr
+            BUTTON
           </Text>
         </div>
       </aside>
 
-      <div className="ntr-main">
-        <header className="ntr-topbar">
+      <div className="app-main">
+        <header className="app-topbar">
           {collapsed ? (
             <Tooltip content="Déplier le menu">
               <IconButton
@@ -137,7 +137,7 @@ export function Shell() {
                 color="gray"
                 size="1"
                 aria-expanded={false}
-                aria-controls="ntr-sidebar"
+                aria-controls="app-sidebar"
                 aria-label="Déplier le menu"
                 onClick={toggleNav}
               >
@@ -146,7 +146,7 @@ export function Shell() {
             </Tooltip>
           ) : null}
           <Flex align="center" gap="2">
-            <span className="ntr-auto-dot" aria-hidden="true" />
+            <span className="app-auto-dot" aria-hidden="true" />
             <Badge color="green" variant="soft">
               AUTO
             </Badge>
@@ -155,12 +155,12 @@ export function Shell() {
             Hors live QG — proto, pas :6811
           </Text>
           <Tooltip content="Heure civile Europe/Paris">
-            <span className="ntr-topbar-clock" aria-label="Heure Paris">
+            <span className="app-topbar-clock" aria-label="Heure Paris">
               {clock}
             </span>
           </Tooltip>
         </header>
-        <div className={`ntr-page${desk ? " ntr-page--desk" : ""}`}>
+        <div className={`app-page${desk ? " app-page--desk" : ""}`}>
           <Outlet />
         </div>
       </div>

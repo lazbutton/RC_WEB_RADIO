@@ -1,5 +1,5 @@
 <icecast>
-    <location>New Trad Radio local bench</location>
+    <location>BUTTON local bench</location>
     <admin>lazbutton@gmail.com</admin>
     <hostname>localhost</hostname>
     <listen-socket>
@@ -7,10 +7,10 @@
         <bind-address>0.0.0.0</bind-address>
     </listen-socket>
     <authentication>
-        <source-password>ntrhackme</source-password>
-        <relay-password>ntrhackme</relay-password>
+        <source-password>buttonhackme</source-password>
+        <relay-password>buttonhackme</relay-password>
         <admin-user>admin</admin-user>
-        <admin-password>ntradmin</admin-password>
+        <admin-password>buttonadmin</admin-password>
     </authentication>
     <limits>
         <clients>32</clients>

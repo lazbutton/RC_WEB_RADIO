@@ -80,8 +80,8 @@ async def test_delete_clock_planned_item(dbsession: ormSession):
             kind="musique",
             when_mode="sequential",
             queue="autodj",
-            resource="NTR Test — Rotation Recette",
-            path="/media/10-rotation/NTR_Test_-_Rotation_Recette.mp3",
+            resource="BUTTON Test — Rotation Recette",
+            path="/media/10-rotation/BUTTON_Test_-_Rotation_Recette.mp3",
             status=RundownStatus.PLANNED.value,
             origin="clock",
         )

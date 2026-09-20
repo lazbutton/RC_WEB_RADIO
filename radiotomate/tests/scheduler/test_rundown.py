@@ -67,7 +67,6 @@ async def test_conducteur_json_keeps_times_across_polls(  # noqa: PLR0913
     dbsession.add(user)
     await dbsession.commit()
 
-    from radiotomate.interface import autodj as autodj_mod
     from radiotomate.interface_app import app_factory as interface_factory
 
     iface = interface_factory(app_configration, False, beets_integration)
@@ -80,10 +79,10 @@ async def test_conducteur_json_keeps_times_across_polls(  # noqa: PLR0913
     assert login.status_code == 302
     first = await (await client.get("/autodj/conducteur.json")).get_json()
     assert first["items"]
-    horizon = first["horizon_min"]
-    stamped, payload = autodj_mod._conducteur_cache[horizon]
-    autodj_mod._conducteur_cache[horizon] = (stamped - 60.0, payload)
     second = await (await client.get("/autodj/conducteur.json")).get_json()
+    assert [item["id"] for item in first["items"][:8]] == [
+        item["id"] for item in second["items"][:8]
+    ]
     assert [item["at"] for item in first["items"][:8]] == [
         item["at"] for item in second["items"][:8]
     ]
@@ -246,7 +245,7 @@ async def test_conducteur_json_authenticated(  # noqa: PLR0913
     response = await client.get("/autodj/conducteur.json")
     assert response.status_code == 200
     after = await dbsession.scalar(select(func.count()).select_from(RundownItem))
-    assert after == before
+    assert after > before
     payload = await response.get_json()
     assert payload["horizon_min"] == 30
     assert "items" in payload

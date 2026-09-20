@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-export type NtrConfig = {
+export type ButtonConfig = {
   streamUrl: string;
   productionStreamUrl?: string;
   nowUrl: string;
@@ -10,7 +10,7 @@ export type NtrConfig = {
 
 declare global {
   interface Window {
-    NTR_CONFIG?: NtrConfig;
+    BUTTON_CONFIG?: ButtonConfig;
     webkitAudioContext?: typeof AudioContext;
   }
 }

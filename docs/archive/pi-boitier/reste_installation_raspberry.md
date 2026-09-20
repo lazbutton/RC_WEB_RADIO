@@ -1,6 +1,6 @@
 # Reste à faire — boîtier Raspberry Pi 3B
 
-> **Prod NTR (sept. 2026)** : l’automate n’est plus Liquidsoap sur ce Pi, c’est **Radiotomate** sur Labomedia. Voir [docs/README.md](docs/README.md). Ce fichier ne couvre que l’encodeur live optionnel (iD14 → port 6800) et l’état matériel du 3B.
+> **Prod BUTTON (sept. 2026)** : l’automate n’est plus Liquidsoap sur ce Pi, c’est **Radiotomate** sur Labomedia. Voir [docs/README.md](docs/README.md). Ce fichier ne couvre que l’encodeur live optionnel (iD14 → port 6800) et l’état matériel du 3B.
 
 Checklist d’exécution pour `rc-web-radio`, calée sur [projet_boitier_webradio_icecast_v3_pi3b.md](projet_boitier_webradio_icecast_v3_pi3b.md). Ce fichier ne remplacerait le cahier que pour le boîtier.
 

@@ -6,7 +6,7 @@ export type CatalogItem = {
   title: string;
   artist?: string;
   durationSec: number;
-  cart?: "Jingles NTR" | "Pubs" | "Promos";
+  cart?: "Jingles" | "Pubs" | "Promos";
   category?: "Rotation" | "Archives";
 };
 
@@ -41,7 +41,7 @@ export const CLOCKS: ClockDef[] = [
     id: "journee",
     name: "Journée avec pubs",
     motif: [
-      { kind: "jingle", cart: "Jingles NTR" },
+      { kind: "jingle", cart: "Jingles" },
       { kind: "musique", category: "Rotation" },
       { kind: "musique", category: "Rotation" },
     ],
@@ -54,7 +54,7 @@ export const CLOCKS: ClockDef[] = [
     id: "soir",
     name: "Soir habillé",
     motif: [
-      { kind: "jingle", cart: "Jingles NTR" },
+      { kind: "jingle", cart: "Jingles" },
       { kind: "musique", category: "Rotation" },
       { kind: "musique", category: "Rotation" },
     ],
@@ -66,7 +66,7 @@ export const CATALOG: CatalogItem[] = [
   { id: "m01", kind: "musique", artist: "Les Veilleurs", title: "Contretemps", durationSec: 214, category: "Rotation" },
   { id: "m02", kind: "musique", artist: "Trio Penhars", title: "Souffle d’ouest", durationSec: 198, category: "Rotation" },
   { id: "m03", kind: "musique", artist: "Marie Lannion", title: "Clair de lande", durationSec: 241, category: "Rotation" },
-  { id: "m04", kind: "musique", artist: "Collectif NTR", title: "Bal de minuit", durationSec: 187, category: "Rotation" },
+  { id: "m04", kind: "musique", artist: "Collectif BUTTON", title: "Bal de minuit", durationSec: 187, category: "Rotation" },
   { id: "m05", kind: "musique", artist: "Yann Kerbrat", title: "Marée basse", durationSec: 223, category: "Rotation" },
   { id: "m06", kind: "musique", artist: "Les Brumes", title: "Route de Pontivy", durationSec: 206, category: "Rotation" },
   { id: "m07", kind: "musique", artist: "Anna Mevel", title: "Fil à fil", durationSec: 231, category: "Rotation" },
@@ -76,7 +76,7 @@ export const CATALOG: CatalogItem[] = [
   { id: "m11", kind: "musique", artist: "Nolwenn Bihan", title: "Chant de haie", durationSec: 192, category: "Rotation" },
   { id: "m12", kind: "musique", artist: "Les Veilleurs", title: "Après la pluie", durationSec: 208, category: "Rotation" },
   { id: "m13", kind: "musique", artist: "Trio Penhars", title: "Anse du Groix", durationSec: 244, category: "Rotation" },
-  { id: "m14", kind: "musique", artist: "Collectif NTR", title: "Rond de Loudéac", durationSec: 201, category: "Rotation" },
+  { id: "m14", kind: "musique", artist: "Collectif BUTTON", title: "Rond de Loudéac", durationSec: 201, category: "Rotation" },
   { id: "m15", kind: "musique", artist: "Marie Lannion", title: "Fenêtre ouverte", durationSec: 227, category: "Rotation" },
   { id: "m16", kind: "musique", artist: "Yann Kerbrat", title: "Nuit de foire", durationSec: 183, category: "Rotation" },
   { id: "a01", kind: "musique", artist: "NTF#2 Plateau", title: "Entretien Kermorvan", durationSec: 312, category: "Archives" },
@@ -87,14 +87,14 @@ export const CATALOG: CatalogItem[] = [
   { id: "a06", kind: "musique", artist: "NTF#1 Plateau", title: "Rencontre luthiers", durationSec: 301, category: "Archives" },
   { id: "a07", kind: "musique", artist: "NTF#3", title: "Encore de minuit", durationSec: 194, category: "Archives" },
   { id: "a08", kind: "musique", artist: "NTF#2", title: "Parade des cercles", durationSec: 221, category: "Archives" },
-  { id: "j01", kind: "jingle", title: "ID New Trad Radio", durationSec: 8, cart: "Jingles NTR" },
-  { id: "j02", kind: "jingle", title: "Virgule courte", durationSec: 4, cart: "Jingles NTR" },
-  { id: "j03", kind: "jingle", title: "Jingle long fest", durationSec: 14, cart: "Jingles NTR" },
-  { id: "j04", kind: "jingle", title: "Identifiant 2026", durationSec: 9, cart: "Jingles NTR" },
-  { id: "j05", kind: "jingle", title: "Sting cuivres", durationSec: 6, cart: "Jingles NTR" },
-  { id: "j06", kind: "jingle", title: "Virgule bombardes", durationSec: 5, cart: "Jingles NTR" },
-  { id: "j07", kind: "jingle", title: "ID nuit", durationSec: 11, cart: "Jingles NTR" },
-  { id: "j08", kind: "jingle", title: "Accroche webradio", durationSec: 7, cart: "Jingles NTR" },
+  { id: "j01", kind: "jingle", title: "ID BUTTON", durationSec: 8, cart: "Jingles" },
+  { id: "j02", kind: "jingle", title: "Virgule courte", durationSec: 4, cart: "Jingles" },
+  { id: "j03", kind: "jingle", title: "Jingle long fest", durationSec: 14, cart: "Jingles" },
+  { id: "j04", kind: "jingle", title: "Identifiant 2026", durationSec: 9, cart: "Jingles" },
+  { id: "j05", kind: "jingle", title: "Sting cuivres", durationSec: 6, cart: "Jingles" },
+  { id: "j06", kind: "jingle", title: "Virgule bombardes", durationSec: 5, cart: "Jingles" },
+  { id: "j07", kind: "jingle", title: "ID nuit", durationSec: 11, cart: "Jingles" },
+  { id: "j08", kind: "jingle", title: "Accroche webradio", durationSec: 7, cart: "Jingles" },
   { id: "p01", kind: "pub", title: "Spot :20 brasserie", durationSec: 22, cart: "Pubs" },
   { id: "p02", kind: "pub", title: "Spot :40 festival", durationSec: 28, cart: "Pubs" },
   { id: "p03", kind: "pub", title: "Pub partenaires NTF", durationSec: 24, cart: "Pubs" },

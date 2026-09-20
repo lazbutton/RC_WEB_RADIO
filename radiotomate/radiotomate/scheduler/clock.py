@@ -18,14 +18,16 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
-from radiotomate.enums import CartMode, PlayoutAction, PositionKind, RundownStatus
+from radiotomate.enums import CartMode, PlayoutAction, PositionKind, RundownStatus, WhenMode
 from radiotomate.models import (
     AutoDJSlot,
     Cart,
     Clock,
     ClockPosition,
     MetadataLog,
+    RundownItem,
     Setting,
+    Sound,
 )
 from radiotomate.scheduler.metrics import runtime_metrics
 from radiotomate.scheduler.outbox import dispatch_command, enqueue_command
@@ -36,7 +38,6 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session as ormSession
 
     from radiotomate.beets import BeetsIntegration
-    from radiotomate.models.sound import Sound
 
 _log = logging.getLogger(__name__)
 
@@ -60,6 +61,10 @@ TARGET_QUEUE_DEPTH = 2
 JINGLE_QUEUE_DEPTH = 1
 AUTODJ_BURST_REMAINING = 8.0
 AUTODJ_BURST_DEPTH = 3
+_PUSHABLE_STATUSES = {
+    RundownStatus.PLANNED.value,
+    RundownStatus.RESCUE.value,
+}
 
 
 @dataclass
@@ -368,14 +373,15 @@ def can_push_sequential_jingle(live_data: dict) -> bool:
     """Avoid cutting a title mid-way; hard anchors still cut separately.
 
     Ne jamais enchaîner un jingle pendant qu’un jingle/cart est à l’antenne :
-    le fallback Liquidsoap resterait collé sur cette file.
+    le fallback Liquidsoap resterait collé sur cette file. Un jingle séquentiel
+    ne coupe pas non plus les titres Auto-DJ déjà en file : il attend que la
+    file autodj soit vide (fin du titre en cours).
     """
     src = source_id(live_data)
     remaining = remaining_seconds(live_data)
     if src in {"jingles", "carts", "stream", "relay"}:
         return False
-    autodj_q = queued_count(live_data, "autodj_queued", "next_autodj")
-    if autodj_q > 0 and remaining <= 0:
+    if queued_count(live_data, "autodj_queued", "next_autodj") > 0:
         return False
     if remaining > JINGLE_PREEMPT_REMAINING:
         return False
@@ -419,6 +425,17 @@ async def tick(  # noqa: PLR0912, PLR0915
     clock = await Clock.from_id(session, slot.clock_id)
     if clock is None:
         _log.warning("Clock %s missing; not filling queues", slot.clock_id)
+        await persist_sequencer_cursor(session)
+        return _finish_tick(started, actions)
+
+    from radiotomate.scheduler.execution import ensure_forecast
+
+    clock_id = clock.id
+    weekday = now.weekday()
+    await ensure_forecast(session, beets, now=now)
+    slot = await AutoDJSlot.from_time(session, minute_of_day, weekday)
+    clock = await Clock.from_id(session, clock_id)
+    if slot is None or clock is None:
         await persist_sequencer_cursor(session)
         return _finish_tick(started, actions)
 
@@ -467,49 +484,198 @@ async def tick(  # noqa: PLR0912, PLR0915
         if remaining_seconds(live_data) < AUTODJ_BURST_REMAINING
         else TARGET_QUEUE_DEPTH
     )
+    live_data, jingles_q, autodj_q = await _fill_sequential_from_rundown(
+        session,
+        gateway,
+        live_data,
+        now,
+        actions,
+        next_anchor=next_anchor,
+        jingles_q=jingles_q,
+        autodj_q=autodj_q,
+        autodj_target=autodj_target,
+    )
+    await persist_sequencer_cursor(session)
+    return _finish_tick(started, actions)
 
-    for _ in range(8):
-        pos = sequential[_state.cursor % len(sequential)]
-        if pos.kind == PositionKind.JINGLE.value:
-            if jingles_q >= JINGLE_QUEUE_DEPTH:
-                if autodj_q >= autodj_target:
-                    break
-                _state.cursor += 1
-                continue
-            if not can_push_sequential_jingle(live_data):
-                if autodj_q >= autodj_target:
-                    break
-                _state.cursor += 1
-                continue
-            pushed = await _push_cart_to_queue(
-                session,
-                gateway,
-                pos,
-                clock,
-                "jingles",
+
+def _meta_from_item(item: RundownItem) -> tuple[str, str]:
+    details = dict(item.details or {})
+    artist = str(details.get("artist") or details.get("cart") or "").strip()
+    title = str(details.get("title") or "").strip()
+    raw = (item.resource or "").strip()
+    if (not artist or not title) and " — " in raw:
+        left, right = raw.split(" — ", 1)
+        artist = artist or left.strip()
+        title = title or right.strip()
+    if not title:
+        title = raw or artist or "titre"
+    return artist, title
+
+
+def _is_jingle_item(item: RundownItem) -> bool:
+    return item.queue == "jingles" or item.kind == PositionKind.JINGLE.value
+
+
+async def _load_pushable_sequential(session: ormSession) -> list[RundownItem]:
+    return list(
+        await session.scalars(
+            select(RundownItem)
+            .where(
+                RundownItem.status.in_(list(_PUSHABLE_STATUSES)),
+                RundownItem.origin != "desk",
+                RundownItem.when_mode != WhenMode.ANCHORED.value,
             )
-            if pushed:
+            .order_by(RundownItem.planned_at, RundownItem.sequence)
+        )
+    )
+
+
+async def _planned_anchor_item(
+    session: ormSession,
+    pos: ClockPosition,
+    now: datetime,
+) -> RundownItem | None:
+    rows = list(
+        await session.scalars(
+            select(RundownItem)
+            .where(
+                RundownItem.status.in_(list(_PUSHABLE_STATUSES)),
+                RundownItem.when_mode == WhenMode.ANCHORED.value,
+                RundownItem.origin != "desk",
+            )
+            .order_by(RundownItem.planned_at, RundownItem.sequence)
+        )
+    )
+    matched = [
+        row
+        for row in rows
+        if pos.id is not None and row.clock_position_id == pos.id
+    ]
+    pool = matched or [
+        row
+        for row in rows
+        if row.kind == pos.kind
+        and (
+            (row.planned_at is not None and row.planned_at.minute == pos.minute)
+            or (row.details or {}).get("minute") == pos.minute
+        )
+    ]
+    for row in pool:
+        planned = row.planned_at
+        if (
+            planned is not None
+            and planned.hour == now.hour
+            and planned.minute == pos.minute
+        ):
+            return row
+    return None
+
+
+async def _push_existing_rundown_item(
+    session: ormSession,
+    gateway: PlayoutGateway,
+    item: RundownItem,
+    *,
+    queue: str | None = None,
+) -> bool:
+    target = queue or item.queue or "autodj"
+    path = (item.path or "").strip()
+    if not path:
+        return False
+    artist, title = _meta_from_item(item)
+    payload: dict = {"path": path, "radiotomate_item_id": item.id}
+    if artist:
+        payload["artist"] = artist
+    if title:
+        payload["title"] = title
+    if item.beets_id:
+        payload["beets_id"] = item.beets_id
+    if item.sound_id:
+        payload["radiotomate_sound_id"] = item.sound_id
+        sound = await Sound.from_id(session, item.sound_id)
+        if sound is not None and sound.gain is not None:
+            payload["rg_track_gain"] = str(sound.gain)
+    details = dict(item.details or {})
+    if details.get("rg_track_gain") is not None:
+        payload.setdefault("rg_track_gain", details["rg_track_gain"])
+    command = await enqueue_command(
+        session,
+        action=PlayoutAction.QUEUE.value,
+        queue=target,
+        payload=payload,
+        item=item,
+    )
+    payload["radiotomate_command_id"] = command.id
+    command.payload = payload
+    result = await dispatch_command(session, command, gateway)
+    if not result.ok:
+        _log.error(
+            "Clock push of rundown %s to %s failed: %s",
+            item.id,
+            target,
+            result.error,
+        )
+        return False
+    if item.sound_id:
+        sound = await Sound.from_id(session, item.sound_id)
+        if sound is not None:
+            sound.last_played = datetime.now()
+    if target == "carts" and item.cart_id:
+        note_carts_push(item.cart_id)
+    _log.info("Clock pushed rundown %s %s to %s", item.kind, path, target)
+    return True
+
+
+async def _fill_sequential_from_rundown(  # noqa: PLR0913
+    session: ormSession,
+    gateway: PlayoutGateway,
+    live_data: dict,
+    now: datetime,
+    actions: list[str],
+    *,
+    next_anchor: int | None,
+    jingles_q: int,
+    autodj_q: int,
+    autodj_target: int,
+) -> tuple[dict, int, int]:
+    hold = False
+    for _ in range(8):
+        if hold:
+            break
+        pending = [
+            item
+            for item in await _load_pushable_sequential(session)
+            if (item.path or "").strip()
+        ]
+        if not pending:
+            break
+        made_progress = False
+        for item in pending:
+            if item.status not in _PUSHABLE_STATUSES:
+                continue
+            if _is_jingle_item(item):
+                if jingles_q >= JINGLE_QUEUE_DEPTH:
+                    continue
+                if autodj_q > 0 or not can_push_sequential_jingle(live_data):
+                    continue
+                if not await _push_existing_rundown_item(
+                    session, gateway, item, queue="jingles"
+                ):
+                    continue
                 actions.append("jingle")
                 _state.cursor += 1
                 jingles_q += 1
-                live_data = {**live_data, "next_jingle": {"rid": 1}}
-                continue
-            _state.cursor += 1
-            continue
-        if pos.kind == PositionKind.MUSIQUE.value:
-            if autodj_q >= autodj_target:
-                if jingles_q >= JINGLE_QUEUE_DEPTH:
-                    break
-                _state.cursor += 1
-                continue
-            item = await _pick_music(session, beets, pos, now)
-            if item is None:
-                _log.warning("No Beets track for clock position %s", pos.id)
-                if autodj_q == 0:
-                    _state.cursor += 1
-                    continue
+                live_data = {
+                    **live_data,
+                    "next_jingle": {"rid": 1},
+                    "jingles_queued": jingles_q,
+                }
+                made_progress = True
                 break
-            length = float(getattr(item, "length", 0) or 0)
+            if autodj_q >= autodj_target:
+                break
+            length = float(item.duration or 0)
             if next_anchor is not None and track_would_overflow_anchor(
                 now,
                 remaining_seconds(live_data),
@@ -520,38 +686,28 @@ async def tick(  # noqa: PLR0912, PLR0915
                     "Holding autodj track so hard anchor at minute %s can fire",
                     next_anchor,
                 )
+                hold = True
                 break
-            ok = await _push_autodj_item(session, gateway, item, pos, clock)
-            if ok:
-                actions.append("autodj")
-                _state.cursor += 1
-                autodj_q += 1
-                live_data = {**live_data, "next_autodj": {"rid": 1}}
+            queue = item.queue if item.queue in {"autodj", "carts"} else "autodj"
+            if not await _push_existing_rundown_item(
+                session, gateway, item, queue=queue
+            ):
                 continue
-            break
-        if pos.kind in {PositionKind.SON.value, PositionKind.PUB.value}:
-            if autodj_q >= autodj_target:
-                if jingles_q >= JINGLE_QUEUE_DEPTH:
-                    break
-                _state.cursor += 1
-                continue
-            pushed = await _push_cart_to_queue(
-                session,
-                gateway,
-                pos,
-                clock,
-                "autodj",
+            actions.append(
+                "autodj" if item.kind == PositionKind.MUSIQUE.value else "autodj_cart"
             )
-            if pushed:
-                actions.append("autodj_cart")
-                _state.cursor += 1
-                autodj_q += 1
-                live_data = {**live_data, "next_autodj": {"rid": 1}}
-                continue
+            _state.cursor += 1
+            autodj_q += 1
+            live_data = {
+                **live_data,
+                "next_autodj": {"rid": 1},
+                "autodj_queued": autodj_q,
+            }
+            made_progress = True
             break
-        _state.cursor += 1
-    await persist_sequencer_cursor(session)
-    return _finish_tick(started, actions)
+        if not made_progress:
+            break
+    return live_data, jingles_q, autodj_q
 
 
 async def _enqueue_cart_sound(
@@ -630,13 +786,22 @@ async def _fire_due_anchors(  # noqa: PLR0913
         key = (now.date().isoformat(), now.hour, pos.minute)
         if key in _state.fired_anchors:
             continue
-        pushed = await _push_cart_to_queue(
-            session,
-            gateway,
-            pos,
-            clock,
-            "carts",
-        )
+        planned = await _planned_anchor_item(session, pos, now)
+        if planned is not None:
+            pushed = await _push_existing_rundown_item(
+                session,
+                gateway,
+                planned,
+                queue="carts",
+            )
+        else:
+            pushed = await _push_cart_to_queue(
+                session,
+                gateway,
+                pos,
+                clock,
+                "carts",
+            )
         if not pushed:
             continue
         _state.fired_anchors.add(key)
@@ -680,14 +845,23 @@ async def _fire_due_soft_anchors(  # noqa: PLR0913
         src = source_id(live_data)
         if remaining > JINGLE_PREEMPT_REMAINING and src not in {"", "starting"}:
             continue
-        pushed = await _push_cart_to_queue(
-            session,
-            gateway,
-            pos,
-            clock,
-            "carts",
-            reason="glissement" if now > occurrence else None,
-        )
+        planned = await _planned_anchor_item(session, pos, now)
+        if planned is not None:
+            pushed = await _push_existing_rundown_item(
+                session,
+                gateway,
+                planned,
+                queue="carts",
+            )
+        else:
+            pushed = await _push_cart_to_queue(
+                session,
+                gateway,
+                pos,
+                clock,
+                "carts",
+                reason="glissement" if now > occurrence else None,
+            )
         if not pushed:
             continue
         _state.fired_anchors.add(key)

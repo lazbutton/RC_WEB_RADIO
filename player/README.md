@@ -1,4 +1,4 @@
-# Player public — New Trad Radio
+# Player public — BUTTON
 
 App Vite + React : embed d’écoute (titre, play, oscilloscope live). Charte newtradfest.com. Cadre visé ~700×200 px.
 
@@ -10,8 +10,8 @@ Radiotomate n’expose pas de page d’écoute grand public. Ce dossier **est** 
 
 ```html
 <iframe
-  src="https://ntradio.example.org/"
-  title="New Trad Radio"
+  src="https://radio.example.org/"
+  title="BUTTON"
   style="width:100%;height:200px;border:0;border-radius:12px"
   allow="autoplay"
 ></iframe>
@@ -30,7 +30,7 @@ Prod :
 
 ```bash
 npm run build
-# copier player/dist/ vers /var/www/ntradio-public
+# copier player/dist/ vers /var/www/button-public
 ```
 
 Dans `public/config.js` (copié tel quel dans `dist/`), mettre `streamUrl` = `productionStreamUrl` au déploiement.
@@ -39,11 +39,11 @@ Icecast + nowplaying : [`ops/banc-mac.md`](../ops/banc-mac.md). Sans source Icec
 
 ## Config runtime (`public/config.js`)
 
-Injectable sans rebuild (`window.NTR_CONFIG`) :
+Injectable sans rebuild (`window.BUTTON_CONFIG`) :
 
 | Clé | Banc | Prod |
 |---|---|---|
-| `streamUrl` | `http://127.0.0.1:18000/ntradio.mp3` | URL Labomedia ou `/ntradio.mp3` (Caddy) |
+| `streamUrl` | `http://127.0.0.1:18000/button.mp3` | URL Labomedia ou `/button.mp3` (Caddy) |
 | `productionStreamUrl` | Labomedia | — |
 | `nowUrl` | `http://127.0.0.1:6820/now.json` | sidecar / `relay_to` |
 | `icecastStatusUrl` | Icecast `status-json.xsl` | idem |
@@ -55,7 +55,7 @@ Le MP3 est d’abord lu en **fetch CORS** + `MediaSource` (blob same-origin), pu
 
 Banc : Icecast envoie `Access-Control-Allow-Origin: *` ([`ops/local/icecast.xml`](../ops/local/icecast.xml)).
 
-Prod : CORS Icecast **ou** flux same-origin `streamUrl: "/ntradio.mp3"` + `handle /ntradio.mp3` dans [`ops/Caddyfile`](../ops/Caddyfile).
+Prod : CORS Icecast **ou** flux same-origin `streamUrl: "/button.mp3"` + `handle /button.mp3` dans [`ops/Caddyfile`](../ops/Caddyfile).
 
 Si MSE/CORS échoue, la lecture directe continue ; le canvas reste une ligne.
 
@@ -68,4 +68,4 @@ Si MSE/CORS échoue, la lecture directe continue ; le canvas reste une ligne.
 | `src/Oscilloscope.tsx` | Canvas trigger |
 | `src/PlayButton.tsx` | Morph play/stop (Motion) |
 | `public/config.js` | URLs |
-| `public/logo-ntr*` | Marque |
+| `public/logo*` | Marque |

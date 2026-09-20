@@ -25,11 +25,11 @@ export function catalogBase(): string {
 }
 
 export function catalogSoundId(path: string): string {
-  return `ntr:${path}`;
+  return `button:${path}`;
 }
 
 export function catalogPathFromId(soundId: string): string | null {
-  return soundId.startsWith("ntr:") ? soundId.slice(4) : null;
+  return soundId.startsWith("button:") ? soundId.slice("button:".length) : null;
 }
 
 export function hitToSound(hit: CatalogHit): LibrarySound {
@@ -42,7 +42,7 @@ export function hitToSound(hit: CatalogHit): LibrarySound {
     durationSec: hit.duration || 0,
     kind,
     color: colorFromKind(kind),
-    source: "ntr",
+    source: "button",
   };
 }
 

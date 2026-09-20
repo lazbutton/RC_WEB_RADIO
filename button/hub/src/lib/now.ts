@@ -12,8 +12,6 @@ const CART_NAMES = new Set([
   "autodj",
   "auto-dj",
   "auto dj",
-  "jingles ntr",
-  "pubs ntr",
 ]);
 
 export type OnAirCopy = {

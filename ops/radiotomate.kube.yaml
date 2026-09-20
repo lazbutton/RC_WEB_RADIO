@@ -14,9 +14,9 @@ spec:
     command: ["liquidsoap", "/app/radiotomate.liq"]
     env:
       - name: RTCONFIG
-        value: /home/ntradio/radiotomate_data/radiotomate.yaml
+        value: /home/button/radiotomate_data/radiotomate.yaml
     volumeMounts:
-      - mountPath: /home/ntradio/radiotomate_data:z
+      - mountPath: /home/button/radiotomate_data:z
         name: data-volume
     ports:
       - containerPort: 6800
@@ -26,11 +26,11 @@ spec:
     command: ["radiotomate", "interface"]
     env:
       - name: RTCONFIG
-        value: /home/ntradio/radiotomate_data/radiotomate.yaml
+        value: /home/button/radiotomate_data/radiotomate.yaml
       - name: BEETSDIR
-        value: /home/ntradio/radiotomate_data/Beets
+        value: /home/button/radiotomate_data/Beets
     volumeMounts:
-      - mountPath: /home/ntradio/radiotomate_data:z
+      - mountPath: /home/button/radiotomate_data:z
         name: data-volume
     ports:
       - containerPort: 6811
@@ -40,22 +40,22 @@ spec:
     command: ["radiotomate", "scheduler"]
     env:
       - name: RTCONFIG
-        value: /home/ntradio/radiotomate_data/radiotomate.yaml
+        value: /home/button/radiotomate_data/radiotomate.yaml
       - name: BEETSDIR
-        value: /home/ntradio/radiotomate_data/Beets
+        value: /home/button/radiotomate_data/Beets
     volumeMounts:
-      - mountPath: /home/ntradio/radiotomate_data:z
+      - mountPath: /home/button/radiotomate_data:z
         name: data-volume
   - name: dropbox
     image: localhost/radiotomate/webapps:latest
     command: ["beet", "dropbox"]
     env:
       - name: BEETSDIR
-        value: /home/ntradio/radiotomate_data/Beets
+        value: /home/button/radiotomate_data/Beets
     volumeMounts:
-      - mountPath: /home/ntradio/radiotomate_data:z
+      - mountPath: /home/button/radiotomate_data:z
         name: data-volume
   volumes:
     - name: data-volume
       hostPath:
-        path: /home/ntradio/radiotomate_data
+        path: /home/button/radiotomate_data

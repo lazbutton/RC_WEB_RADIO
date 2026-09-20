@@ -29,11 +29,10 @@ from radiotomate.scheduler.clock import (
     advance_sequencer_cursor,
     now_paris,
 )
-from radiotomate.scheduler.execution import preview_rundown
+from radiotomate.scheduler.execution import ensure_forecast
 from radiotomate.scheduler.rundown import (
     DEFAULT_CART_SEC,
     DEFAULT_MUSIC_SEC,
-    build_rundown,
 )
 
 if TYPE_CHECKING:
@@ -102,7 +101,7 @@ class Scheduler:
         force: bool = False,
     ) -> dict:
         _ = force
-        return await preview_rundown(session, beets, horizon_min=horizon_min)
+        return await ensure_forecast(session, beets, horizon_min=horizon_min)
 
     def discard_forecast(self) -> None:
         return
@@ -476,10 +475,19 @@ class SchedulerDemo(Scheduler):
 
     async def _load_items(self, session, horizon_min: int = 30) -> None:
         beets = BeetsIntegration.get()
-        data = await build_rundown(session, beets, horizon_min=horizon_min)
-        self._items = list(data.get("items") or [])
+        data = await ensure_forecast(session, beets, horizon_min=horizon_min)
+        incoming = list(data.get("items") or [])
+        played_ids = {row.get("id") for row in self._played if row.get("id")}
+        incoming = [item for item in incoming if item.get("id") not in played_ids]
+        if self._items:
+            have = {item.get("id") for item in self._items if item.get("id")}
+            self._items.extend(
+                item for item in incoming if item.get("id") and item.get("id") not in have
+            )
+        else:
+            self._items = incoming
         self._forecast = []
-        self._forecast_horizon = 0
+        self._forecast_horizon = horizon_min
         self._rundown_meta = {
             "horizon_min": data.get("horizon_min", horizon_min),
             "clock": data.get("clock"),
@@ -527,36 +535,43 @@ class SchedulerDemo(Scheduler):
         *,
         force: bool = False,
     ) -> dict:
+        _ = force
         async with self._lock:
             await self._bootstrap()
-            if force:
-                self._forecast = []
-                self._forecast_horizon = 0
-            if self._forecast_horizon < horizon_min or not self._forecast:
-                data = await build_rundown(session, beets, horizon_min=horizon_min)
-                self._forecast = self._display_items(list(data.get("items") or []))
-                self._forecast_horizon = horizon_min
-                self._rundown_meta["horizon_min"] = horizon_min
-                if data.get("clock"):
-                    self._rundown_meta["clock"] = data.get("clock")
-                if data.get("daypart"):
-                    self._rundown_meta["daypart"] = data.get("daypart")
-            upcoming = list(self._forecast or self._items)
-            if upcoming:
-                current = dict(upcoming[0])
-                current["status"] = "à l'antenne"
-                current["status_code"] = "on_air"
-                upcoming[0] = current
+            data = await ensure_forecast(session, beets, horizon_min=horizon_min)
+            upcoming = [dict(row) for row in data.get("items") or []]
+            current = self._items[0] if self._items else None
+            current_id = current.get("id") if current else None
+            current_resource = current.get("resource") if current else None
+            played_ids = {row.get("id") for row in self._played if row.get("id")}
+            marked = False
+            for item in upcoming:
+                item_id = item.get("id")
+                if item_id and item_id in played_ids:
+                    continue
+                if current_id and item_id == current_id:
+                    item["status"] = "à l'antenne"
+                    item["status_code"] = "on_air"
+                    marked = True
+                    break
+                if (
+                    not current_id
+                    and current_resource
+                    and item.get("resource") == current_resource
+                ):
+                    item["status"] = "à l'antenne"
+                    item["status_code"] = "on_air"
+                    marked = True
+                    break
+            if not marked and upcoming:
+                upcoming[0]["status"] = "à l'antenne"
+                upcoming[0]["status_code"] = "on_air"
+            clock = data.get("clock") or self._rundown_meta.get("clock")
+            daypart = data.get("daypart") or self._rundown_meta.get("daypart")
             items = [dict(row) for row in self._played] + upcoming
-            clock = self._rundown_meta.get("clock")
-            daypart = self._rundown_meta.get("daypart")
-            header = upcoming[0] if upcoming else (items[0] if items else None)
-            if header:
-                clock = header.get("clock") or clock
-                daypart = header.get("daypart") or daypart
             return {
                 "now": now_paris().isoformat(),
-                "horizon_min": self._rundown_meta.get("horizon_min") or horizon_min,
+                "horizon_min": data.get("horizon_min") or horizon_min,
                 "clock": clock,
                 "daypart": daypart,
                 "items": items,

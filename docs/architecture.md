@@ -1,16 +1,16 @@
-# Architecture New Trad Radio
+# Architecture BUTTON
 
-Quatre dossiers à la racine : [`player/`](../player/README.md), [`festival/`](../festival/README.md), [`radiotomate/`](../radiotomate/NTR.md), [`ops/`](../ops/README.md). Carte : [`README.md`](../README.md).
+Dossiers à la racine : [`player/`](../player/README.md), [`radiotomate/`](../radiotomate/README.md), [`ops/`](../ops/README.md). Carte : [`README.md`](../README.md).
 
 Priorité d’antenne Radiotomate : **live > relais > carts > auto-DJ**.
 
 ```text
 Producteurs (RCO, Zef, P-Node, Zamzamrec)
-        │  UI admin (Radiotomate, branche ntr/theme)
+        │  UI admin (Radiotomate, branche radiotomate)
         ▼
    Scheduler :6822 (JSON, token interne)
         │
-        ├── Playout Liquidsoap ──► Icecast Labomedia (:8443, mount NTR)
+        ├── Playout Liquidsoap ──► Icecast Labomedia (:8443, mount BUTTON)
         │                              │
         │                              ├── player/ (site auditeur)
         │                              └── relais partenaires

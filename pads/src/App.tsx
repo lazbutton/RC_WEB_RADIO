@@ -185,7 +185,7 @@ export function App() {
   );
 
   const removeSound = useCallback(async (soundId: string) => {
-    if (!soundId.startsWith("ntr:")) {
+    if (!soundId.startsWith("button:")) {
       await deleteSound(soundId);
     }
     forgetBuffer(soundId);

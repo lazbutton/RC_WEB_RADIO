@@ -1,6 +1,27 @@
-const KEEP = 0.035;
-const MAX = 0.07;
-const START = 0.008;
+type Timing = { keepS: number; maxS: number; startS: number };
+
+const PCM_LAN: Timing = { keepS: 0.12, maxS: 0.2, startS: 0.04 };
+/** Tailscale : file large, pas de trou à chaque jitter, burst Icecast ~3 s. */
+const PCM_REMOTE: Timing = { keepS: 2.5, maxS: 6, startS: 1 };
+const CHUNK_S = 0.04;
+const RATE = 44100;
+
+function timingForUrl(url: string): Timing {
+  try {
+    const host = new URL(url).hostname;
+    if (
+      host === "192.168.1.100" ||
+      host === "nasgul" ||
+      host === "localhost" ||
+      host === "127.0.0.1"
+    ) {
+      return PCM_LAN;
+    }
+  } catch {
+    /* proto */
+  }
+  return PCM_REMOTE;
+}
 
 export type WavHandle = {
   analyser: AnalyserNode;
@@ -38,7 +59,10 @@ export async function playStudioWav(
 ): Promise<WavHandle> {
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) throw new Error("audio");
-  const ctx = new Ctx({ latencyHint: "interactive", sampleRate: 44100 });
+  const timing = timingForUrl(url);
+  const ctx = new Ctx({
+    latencyHint: timing.keepS >= 1 ? "playback" : "interactive",
+  });
   const dest = ctx.createGain();
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 4096;
@@ -55,6 +79,24 @@ export async function playStudioWav(
   let playAt = 0;
   let header = true;
   let alive = true;
+  const sources: AudioBufferSourceNode[] = [];
+  const minFrames = Math.max(1024, Math.round(RATE * CHUNK_S));
+
+  function clearSources() {
+    for (const src of sources) {
+      try {
+        src.stop();
+      } catch {
+        /* already stopped */
+      }
+      try {
+        src.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+    }
+    sources.length = 0;
+  }
 
   const lagTimer = window.setInterval(() => {
     if (!alive || ctx.state !== "running") return;
@@ -66,6 +108,7 @@ export async function playStudioWav(
   function stop() {
     alive = false;
     window.clearInterval(lagTimer);
+    clearSources();
     void reader.cancel().catch(() => undefined);
     void ctx.close().catch(() => undefined);
   }
@@ -78,6 +121,41 @@ export async function playStudioWav(
     dest.gain.cancelScheduledValues(now);
     dest.gain.setValueAtTime(dest.gain.value, now);
     dest.gain.linearRampToValueAtTime(Math.max(0, Math.min(1, gain)), now + dur);
+  }
+
+  function enqueue(left: Float32Array, right: Float32Array) {
+    let frames = left.length;
+    if (frames <= 0) return;
+    const now = ctx.currentTime;
+    let when = playAt;
+    if (playAt <= 0) {
+      when = now + timing.startS;
+    } else if (when < now) {
+      when = now;
+    }
+    const queued = Math.max(0, when - now);
+    if (queued >= timing.maxS) return;
+    const roomFrames = Math.floor((timing.maxS - queued) * RATE);
+    if (frames > roomFrames) {
+      const skip = frames - Math.max(0, roomFrames);
+      if (skip >= frames) return;
+      left = left.subarray(skip);
+      right = right.subarray(skip);
+      frames = left.length;
+    }
+    const buffer = ctx.createBuffer(2, frames, RATE);
+    buffer.getChannelData(0).set(left);
+    buffer.getChannelData(1).set(right);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(dest);
+    src.onended = () => {
+      const i = sources.indexOf(src);
+      if (i >= 0) sources.splice(i, 1);
+    };
+    src.start(when);
+    sources.push(src);
+    playAt = when + frames / RATE;
   }
 
   void (async () => {
@@ -95,28 +173,15 @@ export async function playStudioWav(
           leftover = skipped.rest;
           header = skipped.header;
         }
+        if (ctx.state !== "running") {
+          void ctx.resume().catch(() => undefined);
+          continue;
+        }
         const frames = Math.floor(leftover.length / 4);
-        if (frames <= 0 || ctx.state !== "running") continue;
+        if (frames < minFrames) continue;
         const { left, right } = framesFromPcm(leftover, frames);
         leftover = leftover.subarray(frames * 4) as Uint8Array;
-        const buffer = ctx.createBuffer(2, frames, 44100);
-        buffer.getChannelData(0).set(left);
-        buffer.getChannelData(1).set(right);
-        const src = ctx.createBufferSource();
-        src.buffer = buffer;
-        src.connect(dest);
-        const now = ctx.currentTime;
-        let when = playAt;
-        if (when < now + START) when = now + START;
-        const duration = frames / 44100;
-        let offset = 0;
-        if (when - now + duration > MAX) {
-          offset = when - now + duration - KEEP;
-          if (offset >= duration) continue;
-          when = now + START;
-        }
-        src.start(when, offset);
-        playAt = when + (duration - offset);
+        enqueue(left, right);
       }
     } catch (err) {
       if (!signal.aborted) onError?.(err instanceof Error ? err.message : "coupé");

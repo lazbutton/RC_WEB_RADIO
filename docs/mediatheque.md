@@ -1,6 +1,6 @@
-# Médiathèque NTR (Nasgul)
+# Médiathèque BUTTON (Nasgul)
 
-Source de vérité : dataset ZFS **`data/media/ntr`** monté en `/mnt/data/media/ntr`.  
+Source de vérité : dataset ZFS **`data/media/button`** monté en `/mnt/data/media/button`.  
 Ce n’est **pas** le dossier Nextcloud utilisateur, et Beets **ne déplace plus** les fichiers.
 
 ## Arbre
@@ -22,20 +22,20 @@ Ce n’est **pas** le dossier Nextcloud utilisateur, et Beets **ne déplace plus
 ## Noms de fichiers
 
 - Musique : `Artiste - Titre.mp3` + ID3 artiste et titre
-- Habillage : `kind_emission_descriptif.wav` (ex. `jingle_ntr_ouverture.wav`)
+- Habillage : `kind_emission_descriptif.wav` (ex. `jingle_button_ouverture.wav`)
 
 ## Accès
 
 | Voie | URL / chemin |
 |---|---|
-| Finder SMB | `smb://192.168.1.100/NTR-Media` (compte `laz`) |
-| Nextcloud | dossier **NTR Media** (stockage externe Local) |
+| Finder SMB | `smb://192.168.1.100/BUTTON-Media` (compte `laz`) |
+| Nextcloud | dossier **BUTTON Media** (stockage externe Local) |
 | Catalogue | http://192.168.1.100:30127/search?q= |
 | Santé catalogue | http://192.168.1.100:30127/health |
 
 Gros dumps : SMB, pas le navigateur Nextcloud.
 
-ACL NFS4 sur le dataset : `laz` (3000), groupe `ntrmedia` (3001), `rtuser` (1000), Nextcloud apps (568) **et** `www-data` du conteneur Nextcloud (**uid 33** — sans ça, `occ files:scan` refuse `/media/ntr`).
+ACL NFS4 sur le dataset : `laz` (3000), groupe `buttonmedia` (3001), `rtuser` (1000), Nextcloud apps (568) **et** `www-data` du conteneur Nextcloud (**uid 33** — sans ça, `occ files:scan` refuse `/media/button`).
 
 ## Consommateurs
 

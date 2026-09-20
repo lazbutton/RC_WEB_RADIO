@@ -28,7 +28,7 @@ export type LibrarySound = {
   kind: CategoryId;
   color: PadColor;
   catalogId?: string;
-  source?: "local" | "ntr";
+  source?: "local" | "button";
 };
 
 export type LibraryFolder = {

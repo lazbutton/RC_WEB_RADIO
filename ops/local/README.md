@@ -12,9 +12,9 @@ docker compose up --build -d
 
 | Service | URL |
 |---|---|
-| Icecast | http://127.0.0.1:18000/ — admin `admin` / `ntradmin`, source `ntrhackme` |
+| Icecast | http://127.0.0.1:18000/ — admin `admin` / `buttonadmin`, source `buttonhackme` |
 | Now Playing | http://127.0.0.1:6820/now.json |
-| Hook métadonnées | `POST /hook` Bearer `ntr-dev-secret` |
+| Hook métadonnées | `POST /hook` Bearer `button-dev-secret` |
 
 Icecast dans le conteneur : port **8000**. Côté Mac : **18000** (`18000:8000`).
 
@@ -24,4 +24,4 @@ Streamer cart (ID3 artiste/titre) : `python3 stream-cart.py`.
 
 Player : [`player/`](../../player/README.md) (`npm run dev` → http://127.0.0.1:5174/). Sans source Icecast, le player est muet. L’oscilloscope exige les CORS Icecast (rebuild de ce Compose si `icecast.xml` change).
 
-UI Radiotomate démo : [`radiotomate/NTR.md`](../../radiotomate/NTR.md).
+UI Radiotomate démo : [`radiotomate/README.md`](../../radiotomate/README.md).

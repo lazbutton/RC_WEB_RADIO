@@ -199,6 +199,8 @@ def _status_from_forecast(payload: dict) -> str:
         return RundownStatus.RESCUE.value
     if raw == "sauté":
         return RundownStatus.SKIPPED.value
+    if raw == "manquant":
+        return RundownStatus.FAILED.value
     return RundownStatus.PLANNED.value
 
 
@@ -214,6 +216,12 @@ def item_from_forecast(
         "cart": payload.get("cart"),
         "glissement": payload.get("reason") == "glissement",
     }
+    if payload.get("artist"):
+        details["artist"] = payload["artist"]
+    if payload.get("title"):
+        details["title"] = payload["title"]
+    if payload.get("rg_track_gain") is not None:
+        details["rg_track_gain"] = payload["rg_track_gain"]
     return RundownItem(
         id=str(payload.get("id") or uuid4()),
         programming_version_id=version.id,
@@ -266,6 +274,213 @@ async def replace_forecast_items(
     return items
 
 
+def _align_tz(dt: datetime, ref: datetime) -> datetime:
+    if dt.tzinfo is None and ref.tzinfo is not None:
+        return dt.replace(tzinfo=ref.tzinfo)
+    if dt.tzinfo is not None and ref.tzinfo is None:
+        return dt.replace(tzinfo=None)
+    return dt
+
+
+def _row_end_at(row: RundownItem) -> datetime:
+    return row.planned_at + timedelta(seconds=max(0.0, float(row.duration or 0)))
+
+
+def _horizon_end(rows: list[RundownItem], now: datetime) -> datetime:
+    last = None
+    for row in rows:
+        end = _align_tz(_row_end_at(row), now)
+        if last is None or end > last:
+            last = end
+    return last if last is not None else now
+
+
+async def _cursor_after_items(
+    session: ormSession,
+    rows: list[RundownItem],
+) -> int | None:
+    for row in reversed(rows):
+        if row.origin == DESK_ORIGIN:
+            continue
+        if row.when_mode == WhenMode.ANCHORED.value:
+            continue
+        if not row.clock_id or not row.clock_position_id:
+            continue
+        clock = await Clock.from_id(session, row.clock_id)
+        if clock is None:
+            continue
+        for index, pos in enumerate(clock.sequential_positions()):
+            if pos.id == row.clock_position_id:
+                return index + 1
+    return None
+
+
+async def append_forecast_items(
+    session: ormSession,
+    version: ProgrammingVersion,
+    payloads: list[dict],
+    *,
+    existing: list[RundownItem],
+) -> list[RundownItem]:
+    cutoff = None
+    existing_keys: set[tuple] = set()
+    for row in existing:
+        end = _row_end_at(row)
+        if cutoff is None or end > cutoff:
+            cutoff = end
+        planned = naive_datetime(row.planned_at)
+        stamp = planned.replace(microsecond=0) if planned is not None else planned
+        existing_keys.add((stamp, row.path or row.resource))
+    sequence = await _next_sequence(session)
+    items: list[RundownItem] = []
+    cutoff_naive = naive_datetime(cutoff) if cutoff is not None else None
+    for payload in payloads:
+        try:
+            planned = naive_datetime(datetime.fromisoformat(str(payload["at"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if planned is None:
+            continue
+        if cutoff_naive is not None and planned < cutoff_naive:
+            continue
+        key = (
+            planned.replace(microsecond=0),
+            payload.get("path") or payload.get("resource"),
+        )
+        if key in existing_keys:
+            continue
+        items.append(item_from_forecast(payload, version, sequence))
+        sequence += 1
+        existing_keys.add(key)
+    if items:
+        session.add_all(items)
+        await session.flush()
+    return items
+
+
+async def _payload_from_visible(
+    session: ormSession,
+    rows: list[RundownItem],
+    *,
+    now: datetime,
+    horizon_min: int,
+    version: ProgrammingVersion,
+) -> dict:
+    items = [item_to_payload(row) for row in rows]
+    clock = None
+    daypart = None
+    for item in items:
+        if item.get("clock"):
+            clock = item.get("clock")
+            daypart = item.get("daypart")
+            break
+    if not clock:
+        from radiotomate.scheduler.rundown import _header
+
+        clock, daypart = await _header(session, now)
+    return {
+        "now": now.isoformat(),
+        "horizon_min": horizon_min,
+        "clock": clock,
+        "daypart": daypart,
+        "programming_version": version.id,
+        "items": items,
+        "summary": rundown_summary(items),
+    }
+
+
+async def ensure_forecast(
+    session: ormSession,
+    beets: BeetsIntegration,
+    now: datetime | None = None,
+    horizon_min: int = 30,
+    cursor: int | None = None,
+    *,
+    commit: bool = True,
+) -> dict:
+    """Persist a stable rundown window: append when short, never re-draw from now."""
+    from radiotomate.scheduler.rundown import build_rundown, forecast_still_covers
+
+    now = now_paris(now)
+    version = await ensure_programming_version(session)
+    rows = await _visible_items(session, now, horizon_min=horizon_min)
+    target_ahead = max(15, int(horizon_min))
+    if rows and forecast_still_covers(
+        {"items": [item_to_payload(row) for row in rows]},
+        now,
+        min_ahead_min=target_ahead,
+    ):
+        return await _payload_from_visible(
+            session,
+            rows,
+            now=now,
+            horizon_min=horizon_min,
+            version=version,
+        )
+
+    if not rows:
+        forecast = await build_rundown(
+            session,
+            beets,
+            now=now,
+            horizon_min=horizon_min,
+            cursor=cursor,
+        )
+        rows = await _visible_items(session, now, horizon_min=horizon_min)
+        if rows and forecast_still_covers(
+            {"items": [item_to_payload(row) for row in rows]},
+            now,
+            min_ahead_min=target_ahead,
+        ):
+            payload = await _payload_from_visible(
+                session,
+                rows,
+                now=now,
+                horizon_min=horizon_min,
+                version=version,
+            )
+            if commit:
+                await session.commit()
+            return payload
+        await replace_forecast_items(
+            session,
+            version,
+            list(forecast.get("items") or []),
+            now=now,
+        )
+    else:
+        last_end = _horizon_end(rows, now)
+        start_from = last_end if last_end > now else now
+        follow = await _cursor_after_items(session, rows)
+        remaining_min = int(
+            (now + timedelta(minutes=horizon_min) - start_from).total_seconds() // 60
+        )
+        forecast = await build_rundown(
+            session,
+            beets,
+            now=start_from,
+            horizon_min=max(15, remaining_min + 1),
+            cursor=follow if follow is not None else cursor,
+        )
+        await append_forecast_items(
+            session,
+            version,
+            list(forecast.get("items") or []),
+            existing=await _visible_items(session, now, horizon_min=horizon_min),
+        )
+
+    if commit:
+        await session.commit()
+    rows = await _visible_items(session, now, horizon_min=horizon_min)
+    return await _payload_from_visible(
+        session,
+        rows,
+        now=now,
+        horizon_min=horizon_min,
+        version=version,
+    )
+
+
 async def materialize_rundown(
     session: ormSession,
     beets: BeetsIntegration,
@@ -273,33 +488,13 @@ async def materialize_rundown(
     horizon_min: int = 30,
     cursor: int | None = None,
 ) -> dict:
-    from radiotomate.scheduler.rundown import build_rundown
-
-    now = now_paris(now)
-    forecast = await build_rundown(
+    return await ensure_forecast(
         session,
         beets,
         now=now,
         horizon_min=horizon_min,
         cursor=cursor,
     )
-    version = await ensure_programming_version(session)
-    await replace_forecast_items(
-        session,
-        version,
-        list(forecast.get("items") or []),
-        now=now,
-    )
-    rows = await _visible_items(session, now, horizon_min=horizon_min)
-    await session.commit()
-    items = [item_to_payload(item) for item in rows]
-    return {
-        **forecast,
-        "horizon_min": horizon_min,
-        "programming_version": version.id,
-        "items": items,
-        "summary": rundown_summary(items),
-    }
 
 
 async def _visible_items(
@@ -417,11 +612,12 @@ async def reset_conducteur(
     beets: BeetsIntegration,
     horizon_min: int = 30,
 ) -> dict:
-    """Reset motif cursor, drop queued forecast, rebuild from now."""
+    """Reset motif cursor, drop queued forecast, persist a fresh window from now."""
     await reset_sequencer(session, commit=False)
     await clear_live_forecast(session)
     await session.commit()
-    payload = await preview_rundown(session, beets, horizon_min=horizon_min)
+    payload = await ensure_forecast(session, beets, horizon_min=horizon_min)
+    payload = dict(payload)
     payload["action"] = "reset"
     return payload
 

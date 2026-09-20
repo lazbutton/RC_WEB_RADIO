@@ -38,7 +38,7 @@ function parseSlot(slot: unknown): PadAssign | null {
     kind,
     color,
     ...(typeof row.catalogId === "string" ? { catalogId: row.catalogId } : {}),
-    ...(row.source === "ntr" || row.source === "local" ? { source: row.source } : {}),
+    ...(row.source === "button" || row.source === "local" ? { source: row.source } : {}),
   };
 }
 

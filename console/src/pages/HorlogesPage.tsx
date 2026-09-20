@@ -17,10 +17,10 @@ export function HorlogesPage() {
   return (
     <>
       <ProtoNotice />
-      <div className="ntr-studio">
+      <div className="app-studio">
         <ClockList selectedId={clockId} onSelect={setClockId} onProtoSubmit={() => show("Proto sans données")} />
 
-        <div className="ntr-studio-mid">
+        <div className="app-studio-mid">
           <Heading size="3">Atelier d’heure</Heading>
           <Text size="1" color="gray">
             {clock.name}

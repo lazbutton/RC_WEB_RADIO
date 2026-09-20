@@ -319,8 +319,8 @@ export function Scene({
               <Oscilloscope analyser={analyser} playing={on && !starting} mode={wave} className="monitor-wave" />
               {wave === "spectre" && on && !starting ? (
                 <span className="monitor-bands" aria-hidden="true">
+                  <span>A</span>
                   <span>B</span>
-                  <span>M</span>
                   <span>A</span>
                 </span>
               ) : null}

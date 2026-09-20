@@ -1,4 +1,4 @@
-# Automate d’antenne NTR
+# Automate d’antenne BUTTON
 
 Cahier des charges et décisions d’architecture. **Cible**, pas l’état du dépôt.
 
@@ -7,9 +7,9 @@ Cahier des charges et décisions d’architecture. **Cible**, pas l’état du d
 | | |
 |---|---|
 | Statut | Cible — n’est pas la prod |
-| Audience | Éditorial NTR et technique (Radiotomate, Labomedia) |
+| Audience | Éditorial BUTTON et technique (Radiotomate, Labomedia) |
 | Licence | AGPL-3.0-or-later, inchangée |
-| Photo actuelle | [`architecture.md`](architecture.md), [`radiotomate/NTR.md`](../radiotomate/NTR.md), [`festival/README.md`](../festival/README.md) |
+| Photo actuelle | [`architecture.md`](architecture.md), [`radiotomate/README.md`](../radiotomate/README.md) |
 | Inventaire moteur | [`radiotomate-inventaire.md`](radiotomate-inventaire.md) |
 | Live QG | [`live-qg.md`](live-qg.md) |
 | Premier chantier | [`automate-horloges.md`](automate-horloges.md) · [`automate-horloges-plan.md`](automate-horloges-plan.md) |
@@ -37,7 +37,7 @@ Pas un cinquième produit à la racine. Pas un sprint : pas de schéma SQL, pas 
 
 ## 2. Problème et objectif
 
-Radiotomate est un **lecteur prioritaire** : `live > relais > carts > auto-DJ`. Les files se remplissent quand elles se vident. [`festival/grille.js`](../festival/grille.js) décrit NTF#4 (`live`, `relay`, `cart`, `autodj`) mais [`festival/README.md`](../festival/README.md) : changer la grille ne change rien au playout.
+Radiotomate est un **lecteur prioritaire** : `live > relais > carts > auto-DJ`. Les files se remplissent quand elles se vident. L’ancienne grille NTF#4 (projet `festival/` retiré) décrit les types `live`, `relay`, `cart`, `autodj` : changer cette grille ne changeait rien au playout.
 
 Deux vérités. Un producteur peut croire « 20:00 plateau » programmé. C’est vrai seulement si BUTT se connecte à 20:00.
 
@@ -72,7 +72,7 @@ Inclus :
 - as-run existant, non remplacé ;
 - deux régimes, **même** moteur : 24/24 et semaine festival.
 
-Dossiers **quand** on implémentera : `radiotomate/` (scheduler, modèles). Donnée de grille aujourd’hui dans `festival/` : **import**, puis la base commande. `festival/` devient une vue.
+Dossiers **quand** on implémentera : `radiotomate/` (scheduler, modèles). Donnée de grille : **import** (jeton NTF#4), puis la base commande.
 
 ### Hors projet
 
@@ -82,7 +82,6 @@ Autre cahier, pas un élargissement furtif.
 |---|---|---|
 | [`player/`](../player/README.md) | auditeur, React | intouchable |
 | [`ops/`](../ops/README.md) | Icecast, Caddy, banc | l’automate s’y branche, il ne le remplace pas |
-| [`festival/`](../festival/README.md) | dashboard NTF#4 | pas un moteur ; vue / export |
 | [`docs/archive/`](archive/README.md) | ancien Pi | hors prod |
 
 On ne fait pas :
@@ -107,12 +106,10 @@ Le harbor **reste** la préemption max. Ce projet dit quoi faire **quand il n’
                     grille SQLite → horloge → conducteur
                               │
 player/  ──écoute──► Icecast ◄── Liquidsoap (graphe inchangé)
-(ops + Labomedia)              files existantes     ▲
-                                                    │
-festival/  vue / export — plus la source            ┘
+(ops + Labomedia)              files existantes
 ```
 
-Quatre projets à la racine **restent quatre**. Fork `ntr/theme` : un thème ne suffit plus dès que le trafic change ; l’étage reste dans `radiotomate/`.
+Les projets à la racine **restent distincts**. Fork `radiotomate` : un thème ne suffit plus dès que le trafic change ; l’étage reste dans `radiotomate/`.
 
 ### Contraintes d’exploitation
 
@@ -128,13 +125,13 @@ Quatre projets à la racine **restent quatre**. Fork `ntr/theme` : un thème ne 
 
 | Acteur | Décide | Ne décide pas |
 |---|---|---|
-| Éditorial NTR | grille, sync, filet | mixage, Icecast |
+| Éditorial BUTTON | grille, sync, filet | mixage, Icecast |
 | Producteur distant | contenu de ses carts ; harbor s’il a `stream` | grille des autres |
 | QG St Aignan | ouvrir/fermer BUTT | le filet si BUTT est down |
-| Admin Labomedia / NTR | VM, YAML, comptes | programmation artistique |
+| Admin Labomedia / BUTTON | VM, YAML, comptes | programmation artistique |
 | Auditeur | — | player hors projet |
 
-La grille NTF#4 de [`festival/grille.js`](../festival/grille.js) est le **jeu de tests métier**, pas un autre planning.
+La grille NTF#4 (ancien projet festival) est le **jeu de tests métier**, pas un autre planning.
 
 ---
 
@@ -170,7 +167,7 @@ La grille NTF#4 de [`festival/grille.js`](../festival/grille.js) est le **jeu de
 | **ENF-05** | Un seul planificateur de *quand*. Interdit : cron carts TIMED **et** grille en parallèle. |
 | **ENF-06** | Le trafic parle au playout via l’API interne `:6833` déjà exposée. Pas d’API playout parallèle. |
 | **ENF-07** | Disponibilité : même hôte et mêmes process Radiotomate (interface, scheduler, Liquidsoap). Pas de nouveau daemon public. |
-| **ENF-08** | Licence et fork : patches NTR dans `radiotomate/`, AGPL. Pas de contournement par un binaire fermé. |
+| **ENF-08** | Licence et fork : patches BUTTON dans `radiotomate/`, AGPL. Pas de contournement par un binaire fermé. |
 
 ---
 
@@ -235,8 +232,8 @@ Ne plus les rouvrir dans ce projet. Format : retenu / écarté / pourquoi.
 | | |
 |---|---|
 | **Retenu** | Grille, overlay, conducteur : même SQLite que carts, users, `autodj_slots`. |
-| **Écarté** | [`festival/grille.js`](../festival/grille.js) comme calendrier runtime ; YAML git comme unique vérité live. |
-| **Pourquoi** | Le scheduler a déjà la session DB et les FK vers les carts. Une vérité, reprise après crash (EF-13). Git peut porter un **jeton d’import** NTF#4 ; après import, la base commande. `festival/` = vue / export. |
+| **Écarté** | L’ancienne grille NTF#4 comme calendrier runtime ; YAML git comme unique vérité live. |
+| **Pourquoi** | Le scheduler a déjà la session DB et les FK vers les carts. Une vérité, reprise après crash (EF-13). Git peut porter un **jeton d’import** NTF#4 ; après import, la base commande. |
 
 ### ADR-2 — Liquidsoap quasi inchangé
 
@@ -244,7 +241,7 @@ Ne plus les rouvrir dans ce projet. Format : retenu / écarté / pourquoi.
 |---|---|
 | **Retenu** | Interpréter le conducteur vers `POST /queue/…`, `POST /relay`, `DELETE /live`. Jingles via `jingles_queue`, plus `delay(780.)` comme horloge. |
 | **Écarté** | File `conductor_queue` ; réécriture du `fallback` ; horloges dans le `.liq`. |
-| **Pourquoi** | Contrat playout déjà là, fork mince ([`NTR.md`](../radiotomate/NTR.md)). Python oriente, Liquidsoap mixe. Crossfade hors projet. |
+| **Pourquoi** | Contrat playout déjà là, fork mince ([`README.md`](../radiotomate/README.md)). Python oriente, Liquidsoap mixe. Crossfade hors projet. |
 
 ### ADR-3 — Une seule grille
 
@@ -252,7 +249,7 @@ Ne plus les rouvrir dans ce projet. Format : retenu / écarté / pourquoi.
 |---|---|
 | **Retenu** | *Quand* = grille. *Quoi* = cart / filtre Beets / URL / attente harbor. `AutoDJSlot` et carts `ScheduleMode.TIMED` **fusionnent** dans cette grille (migration conceptuelle). |
 | **Écarté** | Troisième calendrier à côté des crons et des slots auto-DJ. Deux planificateurs (ENF-05). |
-| **Pourquoi** | Aujourd’hui deux « quand » pauvres. Un troisième empire le trou NTR. |
+| **Pourquoi** | Aujourd’hui deux « quand » pauvres. Un troisième empire le trou BUTTON. |
 
 ### ADR-4 — Fuseau `Europe/Paris`
 

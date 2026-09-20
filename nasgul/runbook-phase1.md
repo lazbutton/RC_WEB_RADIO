@@ -13,7 +13,7 @@ Les secrets (clés de pools, export de config, identifiants Nextcloud) sont uniq
 | SSH | `ssh nasgul` | Utilisateur `truenas_admin`, clé `~/.ssh/id_ed25519` uniquement (`PasswordAuthentication` off). |
 | Nextcloud | http://192.168.1.100:30125 | Compte `admin`. Version 34.0.4, chart 2.3.65. Pas de Collabora / Imaginary. |
 | Finder (SMB) | `smb://192.168.1.100/Nextcloud` | Compte `laz`. Mot de passe dans `~/.truenas-secrets/smb-finder.json`. Pas d’invité, LAN uniquement. Plus rapide que l’upload web. |
-| Banque sons (SMB) | `smb://192.168.1.100/NTR-Media` | Même compte `laz`. Arbre `00-inbox` … `30-habillage`. |
+| Banque sons (SMB) | `smb://192.168.1.100/BUTTON-Media` | Même compte `laz`. Arbre `00-inbox` … `30-habillage`. |
 | Catalogue | http://192.168.1.100:30127 | Recherche Meilisearch + fichiers Range. |
 
 Hôte SSH (`~/.ssh/config`) :
@@ -43,7 +43,7 @@ Datasets utiles :
 - `data/nextcloud/data` — fichiers utilisateur, `recordsize` 1M
 - `data/nextcloud/postgres_data` — `recordsize` 16K
 - `data/shares` — partages futurs
-- `data/media/ntr` — banque de sons NTR (`recordsize` 1M), SMB `NTR-Media`, Nextcloud **NTR Media**
+- `data/media/button` — banque de sons BUTTON (`recordsize` 1M), SMB `BUTTON-Media`, Nextcloud **BUTTON Media**
 - `data/ix-apps` — runtime Docker / apps TrueNAS
 - `backup/data` — cible de réplication (dataset chiffré, **verrouillé** : normal pour un receive chiffré)
 

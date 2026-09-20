@@ -4,7 +4,7 @@ import { formatMmSs } from "../lib/parisClock";
 import { itemLabel, itemsByCart } from "../mock/catalog";
 
 const BANKS = [
-  { title: "Jingles NTR", cart: "Jingles NTR" as const, hint: "File jingles LS" },
+  { title: "Jingles", cart: "Jingles" as const, hint: "File jingles LS" },
   { title: "Pubs", cart: "Pubs" as const, hint: "Ancres :20 / :40" },
   { title: "Promos / sons", cart: "Promos" as const, hint: "Beds, virgules, promos" },
 ] as const;

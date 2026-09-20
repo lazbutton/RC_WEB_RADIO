@@ -24,7 +24,7 @@ Build : `npm run build`.
 | `/semaine` | Grille 7 × 24 h, dayparts Journée 7h–19h / Soir |
 | `/conducteur` | Même file que le pupitre, ~30 min |
 | `/categories` | Rotation / Archives + requêtes Beets |
-| `/habillage` | Carts Jingles NTR, Pubs, Promos |
+| `/habillage` | Carts Jingles, Pubs, Promos |
 
 `/` redirige vers `/antenne`. Pas de harbor QG. Refresh = reset du mock. Skip / pads mettent à jour Now partout.
 

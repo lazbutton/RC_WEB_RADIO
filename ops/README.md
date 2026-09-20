@@ -13,6 +13,6 @@ Tout ce qui n’est pas du code produit (player, grille, fork Radiotomate) : dé
 | [`secrets.env.example`](secrets.env.example) | Mots de passe, tokens — ne jamais commiter le vrai fichier |
 | [`local/`](local/README.md) | Compose Icecast `:18000` + nowplaying `:6820` |
 | [`scripts/setup-dropbox.sh`](scripts/setup-dropbox.sh) | Taxonomie MusicDropbox |
-| [`scripts/apply-ntr-brand.sh`](scripts/apply-ntr-brand.sh) | `INTERFACE_NAME` en base |
+| [`scripts/apply-button-brand.sh`](scripts/apply-button-brand.sh) | `INTERFACE_NAME` en base |
 
 Prod : suivre [install.html](https://radiotomate.org/install.html) **sur la VM Linux**, puis fusionner les extraits YAML d’ici (ne pas écraser `cookie_salt` / `token` générés).

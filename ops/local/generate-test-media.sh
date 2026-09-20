@@ -14,7 +14,7 @@ make_mp3() {
     "$dest"
 }
 
-make_mp3 "$DROP/habits/NTR - Jingle test.mp3" "NTR" "Jingle test" 4 880
+make_mp3 "$DROP/habits/BUTTON - Jingle test.mp3" "BUTTON" "Jingle test" 4 880
 make_mp3 "$DROP/rotation/Test - Souffle.mp3" "Test" "Souffle" 12 440
 make_mp3 "$DROP/rotation/Test - Contretemps.mp3" "Test" "Contretemps" 12 330
 make_mp3 "$DROP/ntf1/Archive NTF1 - Plateau.mp3" "Archive NTF1" "Plateau" 8 220
@@ -27,5 +27,5 @@ echo
 echo "Sur une install Radiotomate Linux :"
 echo "  rsync -a \"$DROP/\" \"\$DATA_ROOT/MusicDropbox/\""
 echo "  → drop2beets importe rotation/ntf* ; habits/ va dans un cart jingles (UI)."
-echo "Icecast local : http://127.0.0.1:18000/  source password ntrhackme"
+echo "Icecast local : http://127.0.0.1:18000/  source password buttonhackme"
 echo "Now Playing : http://127.0.0.1:6820/now.json"

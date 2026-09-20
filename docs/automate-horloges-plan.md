@@ -31,7 +31,7 @@ Dossier de design, pas `:6811`. Lancer : [`console/README.md`](../console/README
 
 - Pupitre `/antenne` : Now (artiste / titre, restant, skip), file ~10 titres, DnD + suppression (Now et ancres verrouillés), conducteur lisible (rail :00 / :20 / :40), nav et pads repliables.
 - Rail pads : banques Sons / Jingles / Pubs (grille 2×3), fire → `insertNow`. Switch « Jingle après le son » : arme la banque Jingles, **n’insère pas encore** le couple son+jingle (`insertSonThenJingle` existe, non branché).
-- Catalogue mock partagé : catégories Rotation / Archives, carts Jingles NTR / Pubs / Promos, deux horloges **hypothèses** dans [`console/src/mock/catalog.ts`](../console/src/mock/catalog.ts) — Journée (motif + ancres :20 / :40 dures), Soir (motif seul).
+- Catalogue mock partagé : catégories Rotation / Archives, carts Jingles / Pubs / Promos, deux horloges **hypothèses** dans [`console/src/mock/catalog.ts`](../console/src/mock/catalog.ts) — Journée (motif + ancres :20 / :40 dures), Soir (motif seul).
 - `/horloges` `/semaine` `/categories` `/habillage` `/conducteur` : lecture + toasts « proto ». MIDI APC Mini : absent.
 
 ### Prochaines slices (proto seulement)

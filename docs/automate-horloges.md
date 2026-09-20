@@ -1,4 +1,4 @@
-# Automate NTR — horloges
+# Automate BUTTON — horloges
 
 Cahier des charges du **premier chantier** : un automate customisable comme une radio.
 
@@ -9,7 +9,7 @@ La liberté est **énumérée** : quatre *quoi*, deux *quand*, une sync si ancr�
 | | |
 |---|---|
 | Statut | Cible — n’est pas la prod |
-| Audience | Éditorial NTR et technique Radiotomate |
+| Audience | Éditorial BUTTON et technique Radiotomate |
 | Licence | AGPL-3.0-or-later, inchangée |
 | Spec station (plus tard) | [`automate.md`](automate.md) |
 | Feuille horloges | [`automate-horloges-plan.md`](automate-horloges-plan.md) |
@@ -233,7 +233,7 @@ Ce chantier décide **ce que l’auto-DJ enfile**, pas qui a l’antenne live.
 |---|---|
 | **Retenu** | Catégorie = nom + requête Beets. Le reste = carts. |
 | **Écarté** | Pubs/habits dans Beets ; pondéré de filtres à la place de l’horloge. |
-| **Pourquoi** | Médiathèque + cartouches, déjà NTR. |
+| **Pourquoi** | Médiathèque + cartouches, déjà BUTTON. |
 
 ### ADR-H2 — Motif **et** ancres optionnelles
 
@@ -301,11 +301,11 @@ Ce chantier décide **ce que l’auto-DJ enfile**, pas qui a l’antenne live.
 
 ---
 
-## 11. Horloges NTR types (modèles éditoriaux)
+## 11. Horloges BUTTON types (modèles éditoriaux)
 
 À valider. Pas des filets d’antenne.
 
-Catégories : `Rotation` (`grouping:rotation`), `Archives` (`grouping:ntf1,ntf2,ntf3`). Carts : `Jingles NTR`, `Pubs` (à créer), `Promos` (optionnel). Secours : à déclarer (ex. cart Jingles ou catégorie Rotation).
+Catégories : `Rotation` (`grouping:rotation`), `Archives` (`grouping:ntf1,ntf2,ntf3`). Carts : `Jingles`, `Pubs` (à créer), `Promos` (optionnel). Secours : à déclarer (ex. cart Jingles ou catégorie Rotation).
 
 ### 24/24 rotation habillée (sans ancre)
 

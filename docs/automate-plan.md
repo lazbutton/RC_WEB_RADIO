@@ -61,7 +61,7 @@ Pour chaque créneau ci-dessous, l’éditorial fixe :
 - **sync** : dure ou molle ;
 - **filet** : type + cible (cart, filtre auto-DJ, bed) — obligatoire.
 
-Fuseau : `Europe/Paris`. Jeu de tests : [`festival/grille.js`](../festival/grille.js).
+Fuseau : `Europe/Paris`. Jeu de tests : ancienne grille NTF#4 (projet festival retiré).
 
 ### Overlay NTF#4 — à remplir
 
@@ -79,7 +79,7 @@ Légende filet / sync / ressource : `à trancher` = décision manquante. Ne pas 
 | Ven 7, 10:00–17:00 | Auto-DJ | autodj | à trancher | à trancher | à trancher |
 | Ven 7, 17:00–19:00 | Relais Studio Zef | relay | à trancher (URL) | à trancher | à trancher |
 | Ven 7, 19:00–23:00 | QG village — David Chouferbad | live | à trancher | à trancher | à trancher |
-| Sam 8, 11:00–18:00 | Auto-DJ + jingles NTR | autodj | à trancher + cart jingles | à trancher | à trancher |
+| Sam 8, 11:00–18:00 | Auto-DJ + jingles BUTTON | autodj | à trancher + cart jingles | à trancher | à trancher |
 | Sam 8, 18:00–20:00 | Relais P-Node | relay | à trancher (URL) | à trancher | à trancher |
 | Sam 8, 20:00–00:00 | Soirée plateau commun | live | à trancher | à trancher | à trancher |
 | Dim 9, 11:00–16:00 | Archives + clôture | cart | à trancher | à trancher | à trancher |
@@ -96,7 +96,7 @@ Un créneau `autodj` qui **couvre toute la semaine** (pas de trou), plus filet. 
 |---|---|---|---|---|
 | Semaine type, 00:00–24:00 × 7 | autodj | à trancher | molle (défaut proposé, à confirmer) | à trancher |
 
-Horloge v1 (optionnel phase 0) : cart jingles NTR + cadence, surtout pour le samedi festival et le 24/24.
+Horloge v1 (optionnel phase 0) : cart jingles BUTTON + cadence, surtout pour le samedi festival et le 24/24.
 
 ### Livrable phase 0
 
@@ -117,7 +117,7 @@ Aucun fichier logiciel. Pas d’import, pas de scheduler.
 ### Faire
 
 - Persister les créneaux (semaine + overlay) dans le SQLite Radiotomate, même base que carts / users.
-- Importer le jeton NTF#4 (données aujourd’hui dans `festival/`) **plus** les filets / sync signés en phase 0.
+- Importer le jeton NTF#4 **plus** les filets / sync signés en phase 0.
 - Pouvoir relire la grille depuis la base (contrôle interne, pas une SPA).
 - Laisser l’ancien trafic tourner : files vides + cron des carts. La nouvelle grille ne commande pas Liquidsoap.
 
@@ -127,7 +127,7 @@ Grille NTF#4 + semaine 24/24 **lisibles** en base, alignées sur les décisions 
 
 ### On ne touche pas
 
-Liquidsoap, remplissage auto-DJ actuel, crons TIMED, `player/`, `ops/`, DA `festival/`.
+Liquidsoap, remplissage auto-DJ actuel, crons TIMED, `player/`, `ops/`.
 
 ---
 
@@ -201,16 +201,15 @@ Beets / dropbox comme médiathèque, rôles utilisateurs, harbor.
 
 ### Faire
 
-- `festival/` : vue ou export de **la même** grille, plus un calendrier parallèle à maintenir à la main.
-- Import / relecture minimale si besoin (pas d’éditeur complet, pas de SPA).
+- Import / relecture minimale si besoin (pas d’éditeur complet, pas de SPA). Pas de calendrier parallèle.
 
 ### Livrable
 
-Changer la programmation au bon endroit (base) se reflète sur l’affiche équipe. [`festival/README.md`](../festival/README.md) à mettre à jour : ce n’est plus « pas l’automate ».
+Changer la programmation au bon endroit (base) se reflète sur l’affiche équipe.
 
 ### On ne touche pas
 
-Refonte DA festival, player, nouveau site public de grille.
+Player, nouveau site public de grille.
 
 ---
 

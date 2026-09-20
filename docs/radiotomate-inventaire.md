@@ -4,7 +4,7 @@ Commit : `130030b` (`radiotomate/`, remote `https://git.sr.ht/~martink/radiotoma
 
 Source canonique plus récente : Mercurial [foss.heptapod.net/radiotomate/radiotomate](https://foss.heptapod.net/radiotomate/radiotomate/).
 
-Licence : AGPL-3.0-or-later (`radiotomate/LICENSE`). Notes NTR : [`radiotomate/NTR.md`](../radiotomate/NTR.md).
+Licence : AGPL-3.0-or-later (`radiotomate/LICENSE`). Notes BUTTON : [`radiotomate/README.md`](../radiotomate/README.md).
 
 ## Processus (`dev.sh` / pod)
 
@@ -25,9 +25,9 @@ Blueprints Quart (package Python `radiotomate/interface/`, dans ce clone) :
 - `/users` admins
 - `/login`
 
-SASS : `sass/radiotomate.scss` (Bulma) → `npm run build`. Overlay NTR : `sass/_ntr.scss` et `static/ntr.css`.
+SASS : `sass/radiotomate.scss` (Bulma) → `npm run build`. Overlay BUTTON : `sass/_button.scss` et `static/button.css`.
 
-`INTERFACE_NAME` est un réglage **base** (`settings`), pas le YAML 0.1.0. La branche `ntr/theme` le pose à `New Trad Radio`.
+`INTERFACE_NAME` est un réglage **base** (`settings`), pas le YAML 0.1.0. La branche `radiotomate` le pose à `BUTTON`.
 
 ## Scheduler (interne)
 

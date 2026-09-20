@@ -5,7 +5,7 @@ import { formatMmSs } from "../lib/parisClock";
 import { type CatalogItem } from "../mock/catalog";
 import { padItems, useStation } from "../mock/StationContext";
 
-const PADS_KEY = "ntr-pads-collapsed";
+const PADS_KEY = "app-pads-collapsed";
 
 function readPadsCollapsed(): boolean {
   try {

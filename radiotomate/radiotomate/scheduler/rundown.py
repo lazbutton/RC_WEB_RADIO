@@ -371,6 +371,8 @@ async def _prepare_cart(  # noqa: PLR0913
         sound_id=sound.id,
         fallback_used=rescue,
     )
+    payload["artist"] = cart.title
+    payload["title"] = (sound.title or "").strip() or cart.title
     return payload, duration
 
 
@@ -416,6 +418,8 @@ async def _prepare_sequential(  # noqa: PLR0913
             return payload, DEFAULT_MUSIC_SEC, None, None
         length = _duration_seconds(getattr(item, "length", 0), DEFAULT_MUSIC_SEC)
         category_name = pos.category.name if pos.category is not None else None
+        artist = str(getattr(item, "artist", "") or "") or None
+        title = str(getattr(item, "title", "") or "") or None
         payload = _item_payload(
             at=at,
             kind=pos.kind,
@@ -432,8 +436,13 @@ async def _prepare_sequential(  # noqa: PLR0913
             position_id=pos.id,
             beets_id=getattr(item, "id", None),
         )
-        artist = str(getattr(item, "artist", "") or "") or None
-        title = str(getattr(item, "title", "") or "") or None
+        if artist:
+            payload["artist"] = artist
+        if title:
+            payload["title"] = title
+        gain = getattr(item, "rg_track_gain", None)
+        if gain is not None:
+            payload["rg_track_gain"] = gain
         return payload, length, artist, title
     if pos.kind in {
         PositionKind.JINGLE.value,

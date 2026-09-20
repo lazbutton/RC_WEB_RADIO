@@ -6,7 +6,7 @@ Radiotomate suppose que les comptes sont des membres de confiance ([doc rôles](
 
 | Compte | Structure | Rôles |
 |---|---|---|
-| `admin-ntr` | NTR / Labomedia | `admin` |
+| `admin-button` | BUTTON / Labomedia | `admin` |
 | `olmo` | Zamzamrec / flux P-Node | `admin` (2e admin) |
 | `heloise` | Zamzamrec | `carts`, `autodj` |
 | `viviane` | Radio Campus Orléans | `carts`, `autodj`, `live` |
@@ -18,7 +18,7 @@ Radiotomate suppose que les comptes sont des membres de confiance ([doc rôles](
 CLI (dans le pod) :
 
 ```bash
-radiotomate --config-path "$RTCONFIG" users add admin-ntr --admin
+radiotomate --config-path "$RTCONFIG" users add admin-button --admin
 radiotomate --config-path "$RTCONFIG" users add tim --role carts --role autodj --role live --role stream
 radiotomate --config-path "$RTCONFIG" users roles   # liste des identifiants
 ```
@@ -27,7 +27,7 @@ Mots de passe : phrases longues (`minimum_password_length: 20`). Pas d’e-mail 
 
 ## Taxonomie médiathèque
 
-Voir **[mediatheque.md](mediatheque.md)** : arbre unique `data/media/ntr` (inbox → rotation / archives / habillage). Plus de `MusicDropbox/` comme source de vérité.
+Voir **[mediatheque.md](mediatheque.md)** : arbre unique `data/media/button` (inbox → rotation / archives / habillage). Plus de `MusicDropbox/` comme source de vérité.
 
 | Dossier final | Tag Beets | Usage |
 |---|---|---|
@@ -45,7 +45,7 @@ Filtres créneaux (syntaxe Beets) :
 
 ## Carts à créer dans l’UI
 
-1. **Jingles NTR** — mode randomized playlist, associé à tous les créneaux auto-DJ.
+1. **Jingles** — mode randomized playlist, associé à tous les créneaux auto-DJ.
 2. **Archives NTF#1 / #2 / #3** — playlist, programmés hors festival.
 3. **Émissions partenaires** — un cart par radio (RCO, Zef, P-Node).
 4. **Relais P-Node / Zef / RCO** — cart URL Icecast, durée max, soirées simultané (ex. 13–14 nov. 2026).

@@ -2,7 +2,7 @@
 
 Cahier et fichiers d’un projet **abandonné** : Liquidsoap 24/24 sur Raspberry Pi 3B (`/srv/radio`), Icecast distant, healthcheck systemd.
 
-La prod NTR est Radiotomate sur la VM Labomedia. Ne pas installer ce graphe pour New Trad Radio.
+La prod BUTTON est Radiotomate sur la VM Labomedia. Ne pas installer ce graphe pour BUTTON.
 
 | Fichier | Ancien rôle |
 |---|---|

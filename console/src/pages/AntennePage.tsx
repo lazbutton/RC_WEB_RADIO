@@ -36,7 +36,7 @@ export function AntennePage() {
           </Text>
           <Badge variant="outline">{clock.name}</Badge>
           <Flex align="center" gap="2" ml="auto">
-            <span className="ntr-auto-dot" aria-hidden="true" />
+            <span className="app-auto-dot" aria-hidden="true" />
             <Badge color="green" variant="soft">
               AUTO
             </Badge>

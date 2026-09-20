@@ -107,7 +107,7 @@ export function Inspector({ selection, clock }: InspectorProps) {
 
       <Text as="label" size="2" weight="medium">
         Secours
-        <TextField.Root mt="1" value="Jingles NTR" disabled />
+        <TextField.Root mt="1" value="Jingles" disabled />
       </Text>
     </Flex>
   );

@@ -80,7 +80,7 @@
     },
     "icecast": {
       "url": "http://nasgul.taild4714f.ts.net:18000",
-      "stream": "http://nasgul.taild4714f.ts.net:18000/ntradio.mp3",
+      "stream": "http://nasgul.taild4714f.ts.net:18000/button.mp3",
       "status": "http://nasgul.taild4714f.ts.net:18000/status-json.xsl"
     },
     "nowplaying": {
@@ -94,8 +94,8 @@
     },
     "player": {
       "url": "http://127.0.0.1:5174",
-      "streamUrl": "http://radio.lazbutton.xyz:8000/ntradio.mp3",
-      "productionStreamUrl": "https://radio.lazbutton.xyz/ntradio.mp3",
+      "streamUrl": "http://radio.lazbutton.xyz:8000/button.mp3",
+      "productionStreamUrl": "https://radio.lazbutton.xyz/button.mp3",
       "nowUrl": "http://127.0.0.1:6820/now.json",
       "icecastStatusUrl": "https://radio.lazbutton.xyz/status-json.xsl",
       "festivalUrl": "https://newtradfest.com/"

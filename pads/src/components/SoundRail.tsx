@@ -52,7 +52,7 @@ export function SoundRail({
   const needle = query.trim().toLowerCase();
   const matchTitle = (title: string) => !needle || title.toLowerCase().includes(needle);
   const matchSound = (sound: LibrarySound) =>
-    sound.source === "ntr" || sound.soundId.startsWith("ntr:") || matchTitle(sound.title);
+    sound.source === "button" || sound.soundId.startsWith("button:") || matchTitle(sound.title);
   const activeFolders = active
     ? folders.filter((folder) => folder.kind === active.id && matchTitle(folder.title))
     : [];
@@ -425,7 +425,7 @@ function RailItem({
         <span className="rail-item-title">{sound.title}</span>
         <span className="rail-item-dur">{formatMmSs(sound.durationSec)}</span>
       </button>
-      {readOnly || sound.source === "ntr" || sound.soundId.startsWith("ntr:") ? null : (
+      {readOnly || sound.source === "button" || sound.soundId.startsWith("button:") ? null : (
         <button
           type="button"
           className="rail-item-del"

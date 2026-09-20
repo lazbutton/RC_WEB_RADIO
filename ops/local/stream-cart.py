@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "radiotomate" / "radio_data"
 DB = DATA / "radiotomate.db"
-ICE = "icecast://source:ntrhackme@127.0.0.1:18000/ntradio.mp3"
+ICE = "icecast://source:buttonhackme@127.0.0.1:18000/button.mp3"
 HOOK = "http://127.0.0.1:6820/hook"
 CART_ID = 2
 LEADING_INDEX = re.compile(r"^\d+\s+")
@@ -83,7 +83,7 @@ def hook(artist: str, title: str, playlist: str, duration: float) -> None:
             "duration": round(duration, 3),
             "started_at": datetime.now(timezone.utc).isoformat(),
             "source": "cart",
-            "SOURCE_NAME": "new-trad-radio",
+            "SOURCE_NAME": "button",
         },
         ensure_ascii=False,
     ).encode("utf-8")
@@ -92,7 +92,7 @@ def hook(artist: str, title: str, playlist: str, duration: float) -> None:
         data=body,
         method="POST",
         headers={
-            "Authorization": "Bearer ntr-dev-secret",
+            "Authorization": "Bearer button-dev-secret",
             "Content-Type": "application/json",
         },
     )
@@ -137,7 +137,7 @@ def play(path: str, db_title: str, db_duration: float, playlist: str) -> None:
             "-content_type",
             "audio/mpeg",
             "-ice_name",
-            "New Trad Radio",
+            "BUTTON",
             "-ice_description",
             f"{artist} - {title}"[:80],
             "-f",

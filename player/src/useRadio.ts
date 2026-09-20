@@ -74,7 +74,7 @@ type IcecastStatus = {
 };
 
 function cfg() {
-  return window.NTR_CONFIG;
+  return window.BUTTON_CONFIG;
 }
 
 function wait(sb: SourceBuffer) {

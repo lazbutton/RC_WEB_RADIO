@@ -2,7 +2,6 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from random import randint, sample
-from time import monotonic
 
 from quart import Blueprint, g, jsonify, render_template, request, send_file, url_for
 from werkzeug.datastructures import MultiDict
@@ -18,17 +17,16 @@ from radiotomate.scheduler.execution import (
     attach_desk_pins,
     delete_desk_item,
     insert_desk_item,
+    item_to_payload,
     patch_desk_item,
-    preview_rundown,
+    ensure_forecast,
     reorder_desk_items,
     reset_conducteur,
 )
-from radiotomate.scheduler.clock import now_paris
 from radiotomate.scheduler.rundown import (
     DEFAULT_HORIZON_MIN,
     MAX_HORIZON_MIN,
     MIN_HORIZON_MIN,
-    forecast_still_covers,
 )
 from radiotomate.scheduler_api import Scheduler
 from radiotomate.services.autodj import (
@@ -185,12 +183,7 @@ async def _follow_conducteur_reset() -> None:
 async def _conducteur_payload(*, force: bool = False) -> dict:
     beets = BeetsIntegration.get()
     horizon = _conducteur_horizon()
-    if not force:
-        cached = _conducteur_cache.get(horizon)
-        if cached and forecast_still_covers(cached[1], now_paris()):
-            payload = dict(cached[1])
-            payload["now"] = now_paris().isoformat()
-            return await attach_desk_pins(g.dbsession, payload)
+    _ = force
     try:
         scheduler = Scheduler.get()
         payload = await scheduler.live_rundown(
@@ -200,8 +193,7 @@ async def _conducteur_payload(*, force: bool = False) -> dict:
             force=force,
         )
     except RuntimeError:
-        payload = await preview_rundown(g.dbsession, beets, horizon_min=horizon)
-    _conducteur_cache[horizon] = (monotonic(), payload)
+        payload = await ensure_forecast(g.dbsession, beets, horizon_min=horizon)
     return await attach_desk_pins(g.dbsession, payload)
 
 
@@ -256,14 +248,13 @@ async def conducteur_rebuild_json():
         raise BadRequest("JSON object required")
     invalidate_conducteur_cache()
     if _wants_conducteur_reset(data):
+        await _follow_conducteur_reset()
         beets = BeetsIntegration.get()
         payload = await reset_conducteur(
             g.dbsession,
             beets,
             horizon_min=_conducteur_horizon(),
         )
-        await _follow_conducteur_reset()
-        _conducteur_cache[_conducteur_horizon()] = (monotonic(), payload)
         return jsonify(await attach_desk_pins(g.dbsession, payload))
     payload = await _conducteur_payload(force=True)
     payload = dict(payload)
@@ -287,8 +278,10 @@ async def conducteur_insert_item_json():
     if deny:
         return deny
     data = await read_json_object()
-    await insert_desk_item(g.dbsession, data)
-    return jsonify(await _desk_payload())
+    created = await insert_desk_item(g.dbsession, data)
+    payload = await _desk_payload()
+    payload["desk_item"] = item_to_payload(created)
+    return jsonify(payload)
 
 
 @blueprint.patch("/autodj/conducteur/items/<item_id>.json")

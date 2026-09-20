@@ -36,7 +36,7 @@ export function buildQueue(
 ): QueueItem[] {
   const musics = itemsByCategory("Rotation");
   const archives = itemsByCategory("Archives");
-  const jingles = itemsByCart("Jingles NTR");
+  const jingles = itemsByCart("Jingles");
   const pubs = itemsByCart("Pubs");
   const items: QueueItem[] = [];
   let elapsed = 0;
@@ -82,7 +82,7 @@ export function buildQueue(
 export function buildPastQueue(clock: ClockDef, count = 8): QueueItem[] {
   const musics = itemsByCategory("Rotation");
   const archives = itemsByCategory("Archives");
-  const jingles = itemsByCart("Jingles NTR");
+  const jingles = itemsByCart("Jingles");
   const pubs = itemsByCart("Pubs");
   let m = musics.length - 1;
   let j = jingles.length - 1;

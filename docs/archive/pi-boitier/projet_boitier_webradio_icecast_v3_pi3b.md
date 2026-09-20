@@ -17,7 +17,7 @@ Version 3 du cahier de projet, calibrée pour un hôte Raspberry Pi 3B. Objectif
 | Serveur | Icecast sur VPS, derrière un reverse proxy HTTPS |
 | Archivage | reporté après passage sur clé/SSD USB |
 
-Deux points enterrés volontairement. L'écran OLED n'apporte rien qu'un `ssh` ne donne mieux. L'interface web n'est pas sur le Pi : Icecast pour l'écoute, Radiotomate sur Labomedia pour la console (prod NTR actuelle).
+Deux points enterrés volontairement. L'écran OLED n'apporte rien qu'un `ssh` ne donne mieux. L'interface web n'est pas sur le Pi : Icecast pour l'écoute, Radiotomate sur Labomedia pour la console (prod BUTTON actuelle).
 
 ---
 
@@ -738,7 +738,7 @@ journalctl -u radio -f
 
 Bus USB séparé de l'Ethernet, ce qui supprime la contrainte de `--bwlimit`. Permet l'archivage horaire, un second flux Opus, et un Icecast local en secours de dernier recours. Boot NVMe possible sur Pi 5.
 
-La console multi-personnes n'est pas sur le boîtier : c'est Radiotomate sur la VM Labomedia (prod NTR). Le Pi, s'il sert encore, n'est qu'un encodeur live vers le harbor `:6800`.
+La console multi-personnes n'est pas sur le boîtier : c'est Radiotomate sur la VM Labomedia (prod BUTTON). Le Pi, s'il sert encore, n'est qu'un encodeur live vers le harbor `:6800`.
 
 ---
 

@@ -4,7 +4,7 @@
 
 - Compte SSH sur la VM Debian/Ubuntu dédiée (Olmo / Labomedia).
 - Quota disque 100 Go–1 To pour `radiotomate_data/`.
-- Mount Icecast NTR (`/ntradio.mp3` ou nom Labomedia) + mot de passe source.
+- Mount Icecast BUTTON (`/button.mp3` ou nom Labomedia) + mot de passe source.
 - Ports 6811 et 6800 libres en local ; 80/443 pour Caddy.
 - `loginctl enable-linger $USER` après le premier `systemctl --user start`.
 
@@ -37,14 +37,14 @@ Copier [Caddyfile](Caddyfile), adapter le hostname, `systemctl reload caddy`.
 
 Premier jingle dans l’UI (cart jingles), puis MP3 dans `MusicDropbox/rotation/`.
 
-## Marque NTR
+## Marque BUTTON
 
 ```bash
-./ops/scripts/apply-ntr-brand.sh "$HOME/radiotomate_data/radiotomate.db"
+./ops/scripts/apply-button-brand.sh "$HOME/radiotomate_data/radiotomate.db"
 systemctl --user restart radiotomate.service
 ```
 
-Si le code est le fork `ntr/theme`, `INTERFACE_NAME` est déjà posé à l’init.
+Si le code est le fork `radiotomate`, `INTERFACE_NAME` est déjà posé à l’init.
 
 ## Commandes
 
@@ -62,7 +62,7 @@ tail -f ~/radiotomate_data/playout.log ~/radiotomate_data/interface.log
 
 ## Player public
 
-Copier le **build** [`player/dist/`](../player/) (`npm run build` dans `player/`) vers `/var/www/ntradio-public`. Dans `config.js`, mettre `streamUrl` = `productionStreamUrl`. Caddy : second bloc de [`Caddyfile`](Caddyfile).
+Copier le **build** [`player/dist/`](../player/) (`npm run build` dans `player/`) vers `/var/www/button-public`. Dans `config.js`, mettre `streamUrl` = `productionStreamUrl`. Caddy : second bloc de [`Caddyfile`](Caddyfile).
 
 ## Ancien automate Pi
 

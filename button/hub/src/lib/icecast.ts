@@ -45,7 +45,7 @@ export function icecastSources(payload: IcecastStats | null | undefined): Icecas
 export function icecastSource(payload: IcecastStats | null | undefined): IcecastSource | null {
   const all = icecastSources(payload);
   return (
-    all.find((item) => /ntradio\.mp3/i.test(`${item.listenurl || ""} ${item.server_name || ""}`)) ||
+    all.find((item) => /button\.mp3/i.test(`${item.listenurl || ""} ${item.server_name || ""}`)) ||
     all[0] ||
     null
   );

@@ -13,6 +13,7 @@ from radiotomate.models.sound import Sound
 from radiotomate.scheduler.clock import (
     PARIS,
     anchor_in_daypart,
+    can_push_sequential_jingle,
     next_hard_anchor_minute,
     note_carts_push,
     sequential_kind_cycle,
@@ -44,6 +45,18 @@ def _live(time: str, **queues) -> dict:
     }
     data.update(queues)
     return data
+
+
+def test_can_push_sequential_jingle_gates_source_remaining_and_autodj():
+    assert can_push_sequential_jingle(_live(NIGHT, remaining="2", autodj_queued=0)) is True
+    assert can_push_sequential_jingle(_live(NIGHT, remaining="2", autodj_queued=1)) is False
+    assert can_push_sequential_jingle(_live(NIGHT, remaining="180", autodj_queued=0)) is False
+    assert (
+        can_push_sequential_jingle(
+            _live(NIGHT, source="jingles", remaining="0.2", autodj_queued=0)
+        )
+        is False
+    )
 
 
 def test_anchor_in_daypart():
@@ -219,6 +232,44 @@ async def test_does_not_chain_jingles_when_current_jingle_ends(
             NIGHT,
             source="jingles",
             remaining="0.2",
+            next_jingle={"rid": -1},
+            next_autodj={"rid": 1},
+            jingles_queued=0,
+            autodj_queued=2,
+        ),
+        client,
+        beets_integration,
+    )
+    assert "jingle" not in actions
+    assert all(not str(c.args[0]).endswith("/jingles") for c in client.post.call_args_list)
+
+
+async def test_tick_does_not_jump_ahead_to_later_jingle(
+    dbsession: ormSession,
+    jingles_cart: Cart,
+    beets_integration: BeetsIntegration,
+):
+    from radiotomate.models import RundownItem
+    from radiotomate.scheduler.execution import ensure_forecast
+
+    now = datetime(2026, 9, 14, 0, 30, tzinfo=PARIS)
+    data = await ensure_forecast(dbsession, beets_integration, now=now, cursor=0)
+    first_jingle = next(item for item in data["items"] if item.get("kind") == "jingle")
+    row = await RundownItem.from_id(dbsession, first_jingle["id"])
+    assert row is not None
+    row.status = "in_queue"
+    await dbsession.commit()
+    assert any(
+        item.get("kind") == "jingle" and item["id"] != first_jingle["id"]
+        for item in data["items"]
+    )
+    client = _client()
+    actions = await tick(
+        dbsession,
+        _live(
+            NIGHT,
+            source="autodj",
+            remaining="2",
             next_jingle={"rid": -1},
             next_autodj={"rid": 1},
             jingles_queued=0,

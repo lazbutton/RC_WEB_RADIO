@@ -32,6 +32,12 @@ function columnEnergy(freq: Uint8Array, sampleRate: number, fftSize: number, t: 
   return peak;
 }
 
+function mirroredSpectrum(bars: Float32Array, i: number) {
+  const last = bars.length - 1;
+  const dist = Math.abs(i - last / 2) / (last / 2);
+  return bars[Math.round(dist * last)];
+}
+
 function findTrigger(data: Uint8Array) {
   const mid = 128;
   const last = Math.floor(data.length / 2);
@@ -155,10 +161,11 @@ export function Oscilloscope({ analyser, playing, mode, className }: Props) {
       const width = Math.max(1.4, step * 0.55);
       g.lineCap = "round";
       for (let i = 0; i < COLS; i++) {
-        const h = shown.current[i] * maxH;
+        const v = mirroredSpectrum(shown.current, i);
+        const h = v * maxH;
         if (h < 1.5) continue;
         const x = (i + 0.5) * step;
-        g.strokeStyle = `rgba(${WHITE}, ${0.22 + shown.current[i] * 0.28})`;
+        g.strokeStyle = `rgba(${WHITE}, ${0.22 + v * 0.28})`;
         g.lineWidth = width + 2.4;
         g.beginPath();
         g.moveTo(x, mid - gap - h);
@@ -166,7 +173,7 @@ export function Oscilloscope({ analyser, playing, mode, className }: Props) {
         g.moveTo(x, mid + gap);
         g.lineTo(x, mid + gap + h);
         g.stroke();
-        g.strokeStyle = `rgba(${WHITE}, ${0.55 + shown.current[i] * 0.4})`;
+        g.strokeStyle = `rgba(${WHITE}, ${0.55 + v * 0.4})`;
         g.lineWidth = width;
         g.beginPath();
         g.moveTo(x, mid - gap - h);
@@ -191,7 +198,7 @@ export function Oscilloscope({ analyser, playing, mode, className }: Props) {
         g.beginPath();
         g.moveTo(0, mid + sign * gap);
         for (let i = 0; i < COLS; i++) {
-          g.lineTo((i / (COLS - 1)) * cssW, mid + sign * (gap + bars[i] * maxH));
+          g.lineTo((i / (COLS - 1)) * cssW, mid + sign * (gap + mirroredSpectrum(bars, i) * maxH));
         }
         g.lineTo(cssW, mid + sign * gap);
         g.closePath();
@@ -200,7 +207,7 @@ export function Oscilloscope({ analyser, playing, mode, className }: Props) {
         g.beginPath();
         for (let i = 0; i < COLS; i++) {
           const x = (i / (COLS - 1)) * cssW;
-          const y = mid + sign * (gap + bars[i] * maxH);
+          const y = mid + sign * (gap + mirroredSpectrum(bars, i) * maxH);
           if (i === 0) g.moveTo(x, y);
           else g.lineTo(x, y);
         }
@@ -263,14 +270,14 @@ export function Oscilloscope({ analyser, playing, mode, className }: Props) {
       const maxH = mid - 8;
       g.fillStyle = `rgba(${WHITE}, 0.88)`;
       for (let i = 0; i < COLS; i++) {
-        const v = shown.current[i];
-        if (v < 0.04) continue;
+        const v = mirroredSpectrum(shown.current, i);
+        if (v < 0.03) continue;
         const x = ((i + 0.5) / COLS) * cssW;
-        const n = 2 + Math.round(v * 7);
+        const n = 4 + Math.round(v * 14);
+        const r = 0.42 + v * 0.85;
         for (let k = 0; k < n; k++) {
           const t = (k + 1) / (n + 1);
           const h = v * maxH * t;
-          const r = 0.7 + v * 1.4;
           g.beginPath();
           g.arc(x, mid - h, r, 0, Math.PI * 2);
           g.arc(x, mid + h, r, 0, Math.PI * 2);

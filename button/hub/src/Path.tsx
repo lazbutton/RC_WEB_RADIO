@@ -73,7 +73,7 @@ export function Path({ snap, live, announce, harborMs, casqueLabel, casqueMs, on
   }
 
   const casqueKind: Kind =
-    casqueMs != null ? (casqueMs > 120 ? "bad" : "ok") : prerollPending || waiting ? "wait" : "bad";
+    casqueMs != null ? (casqueMs > 2000 ? "bad" : "ok") : prerollPending || waiting ? "wait" : "bad";
   const mp3Kind: Kind =
     snap.prerollMs != null ? (snap.prerollMs > 500 ? "bad" : "ok") : prerollPending || waiting ? "wait" : "bad";
   const vpsLoading = waiting || (snap.measuring && snap.publicOn && !vpsValue);
@@ -100,7 +100,7 @@ export function Path({ snap, live, announce, harborMs, casqueLabel, casqueMs, on
   const metaAge = ageSeconds(snap.now?.received_at);
   const metaDead = metaAge == null || metaAge > META_DEAD_S;
   const silence = meterOk ? rawSilence : snap.nasgul && !metaDead ? 0 : rawSilence;
-  const mount = sourceMount(snap.nasgul) || "ntradio.mp3";
+  const mount = sourceMount(snap.nasgul) || "button.mp3";
   const codec = sourceCodec(snap.nasgul) || "MP3";
   const cpu = num(machine?.cpu_pct);
   const ram = num(machine?.rss_mb);

@@ -11,7 +11,6 @@ Racine du dépôt : dossier parent de `ops/` (`RC_WEB_RADIO`).
 | Icecast de test | Docker `:18000` | Labomedia `:8443` |
 | Titre en cours | nowplaying `:6820` | même sidecar ou `relay_to` |
 | Player | `player/` (`npm run dev` → `:5174`) | site derrière Caddy (`dist/`) |
-| Grille festival | `festival/` | idem |
 | Radiotomate UI `:6811` | `interface --demo` (sans playout) | `install.sh` + systemd |
 | Pi 3B | optionnel, encodeur live | QG mai 2027 |
 
@@ -27,7 +26,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-- Icecast admin : http://127.0.0.1:18000/ — `admin` / `ntradmin` (source `ntrhackme`)
+- Icecast admin : http://127.0.0.1:18000/ — `admin` / `buttonadmin` (source `buttonhackme`)
 - Now Playing : http://127.0.0.1:6820/now.json
 
 Si le port **6820** est pris : `lsof -nP -iTCP:6820` puis tuer l’ancien `nowplaying.py`.
@@ -48,11 +47,11 @@ Les MP3 des carts ont souvent une pochette en flux vidéo : **toujours** `-vn -m
 ```bash
 ffmpeg -re -f lavfi -i sine=frequency=440:sample_rate=48000:duration=30 \
   -c:a libmp3lame -b:a 128k -content_type audio/mpeg \
-  -ice_name "New Trad Radio" \
-  -f mp3 "icecast://source:ntrhackme@127.0.0.1:18000/ntradio.mp3"
+  -ice_name "BUTTON" \
+  -f mp3 "icecast://source:buttonhackme@127.0.0.1:18000/button.mp3"
 ```
 
-Flux : http://127.0.0.1:18000/ntradio.mp3
+Flux : http://127.0.0.1:18000/button.mp3
 
 Boucle du cart « Prog 100% féminine » (tags ID3 artiste/titre, pas le nom de playlist) :
 
@@ -64,23 +63,16 @@ Pousser un titre vers le player :
 
 ```bash
 curl -sS -X POST http://127.0.0.1:6820/hook \
-  -H "Authorization: Bearer ntr-dev-secret" \
+  -H "Authorization: Bearer button-dev-secret" \
   -H "Content-Type: application/json" \
-  -d '{"artist":"NTR","title":"Banc local","source":"test"}'
+  -d '{"artist":"BUTTON","title":"Banc local","source":"test"}'
 ```
 
-## 3. Player + grille
+## 3. Player
 
 ```bash
 cd player && npm install && npm run dev
 # http://127.0.0.1:5174/
-```
-
-Grille (statique) depuis la racine du dépôt :
-
-```bash
-python3 -m http.server 8765
-# http://127.0.0.1:8765/festival/
 ```
 
 ## 4. Interface Radiotomate (démo)
@@ -90,14 +82,13 @@ python3 -m http.server 8765
 ```bash
 export PATH="/opt/homebrew/bin:$PATH"
 cd radiotomate
-git checkout ntr/theme
 poetry install
 poetry run radiotomate develop
-poetry run radiotomate -c radio_data/radiotomate.yaml users add ntr --admin
+poetry run radiotomate -c radio_data/radiotomate.yaml users add button --admin
 poetry run radiotomate -c radio_data/radiotomate.yaml interface --demo --reload
 ```
 
-UI : http://127.0.0.1:6811 — admin **sans** vrai playout. Détail : [`radiotomate/NTR.md`](../radiotomate/NTR.md).
+UI : http://127.0.0.1:6811 — admin **sans** vrai playout. Détail : [`radiotomate/README.md`](../radiotomate/README.md).
 
 ## 5. Tout éteindre
 

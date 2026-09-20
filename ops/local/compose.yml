@@ -13,8 +13,10 @@ services:
     command: ["python", "/app/nowplaying.py"]
     environment:
       RT_NOWPLAYING_PORT: "6820"
-      RT_NOWPLAYING_SECRET: ntr-dev-secret
+      RT_NOWPLAYING_SECRET: button-dev-secret
       RT_NOWPLAYING_FILE: /data/now.json
+      RT_PLAYOUT_URL: http://radiotomate-playout:6833
+      RT_PLAYOUT_PCM: radiotomate-playout:6802
     volumes:
       - ./nowplaying.py:/app/nowplaying.py:ro
       - ./data:/data

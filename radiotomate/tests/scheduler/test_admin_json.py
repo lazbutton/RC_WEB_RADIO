@@ -1315,7 +1315,14 @@ async def test_conducteur_post_refresh_and_reset(  # noqa: PLR0913
     payload = await reset.get_json()
     assert payload["action"] == "reset"
     assert payload["items"]
-    assert payload["items"][0]["kind"] == "jingle"
+    assert payload["items"][0]["id"] == "ri-conducteur-onair"
+    planned = [
+        item
+        for item in payload["items"]
+        if item.get("status_code") == "planned" and item.get("origin") != "desk"
+    ]
+    assert planned
+    assert planned[0]["kind"] == "jingle"
     dbsession.expire_all()
     cursor_row = await Setting.from_key(dbsession, SETTING_CLOCK_SEQ_CURSOR)
     clock_row = await Setting.from_key(dbsession, SETTING_CLOCK_SEQ_CLOCK_ID)

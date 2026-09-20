@@ -13,7 +13,7 @@ export function PlayButton({ playing, onToggle }: Props) {
       id="play"
       className={playing ? "play-btn is-live" : "play-btn"}
       aria-pressed={playing}
-      aria-label={playing ? "Arrêter New Trad Radio" : "Écouter New Trad Radio"}
+      aria-label={playing ? "Arrêter BUTTON" : "Écouter BUTTON"}
       onClick={onToggle}
     >
       <svg viewBox="0 0 24 24" aria-hidden="true">
