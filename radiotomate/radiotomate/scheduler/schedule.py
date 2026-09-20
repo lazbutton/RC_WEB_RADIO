@@ -283,6 +283,17 @@ async def push_sound_now(cart_id: str, sound_id: str):
     return "", 200
 
 
+@blueprint.post("/queues/flush")
+@token_required
+async def flush_playout_queues():
+    gateway = gateway_for(current_app.config["PLAYOUT_CLIENT"])
+    result = await gateway.flush_queues()
+    payload = result.payload if isinstance(result.payload, dict) else {}
+    if not result.ok:
+        return {"ok": False, "error": result.error or "playout_unavailable"}, 502
+    return {"ok": True, "queues": payload}
+
+
 @blueprint.post("/schedule/path/now")
 @token_required
 async def push_path_now():

@@ -1,0 +1,10 @@
+services:
+  button-hub:
+    image: nasgul-button-hub:local
+    restart: unless-stopped
+    ports:
+      - "30120:80"
+    mem_limit: 64m
+    cpus: "0.25"
+    security_opt:
+      - no-new-privileges:true

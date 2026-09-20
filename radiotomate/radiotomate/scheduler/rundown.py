@@ -5,14 +5,14 @@ On-the-fly clock rundown (phase 3): list ≥ 30 min without pushing Liquidsoap.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from random import choice
 from typing import TYPE_CHECKING
 
 from radiotomate.domain.execution import item_status_code
-from radiotomate.enums import PositionKind
+from radiotomate.enums import CartMode, PositionKind
 from radiotomate.models import AutoDJSlot, Clock
 from radiotomate.scheduler.clock import (
     _load_cart,
-    _next_available_sound,
     _pick_music,
     load_sequencer_cursor,
     next_hard_anchor,
@@ -161,10 +161,58 @@ def _clock_cart_ref(pos: ClockPosition, clock: Clock) -> tuple[int | None, str]:
     return None, ""
 
 
+async def _cached_cart(
+    session: ormSession,
+    cache: dict,
+    cart_id: int | None,
+    title: str | None,
+):
+    if cart_id is not None:
+        key: tuple = ("id", cart_id)
+    elif title:
+        key = ("title", title)
+    else:
+        return None
+    if key not in cache:
+        loaded = await _load_cart(session, title, cart_id=cart_id)
+        cache[key] = loaded
+        if loaded is not None:
+            cache[("id", loaded.id)] = loaded
+            if loaded.title:
+                cache[("title", loaded.title)] = loaded
+    return cache.get(key)
+
+
+def _next_preview_sound(cart, used: set[int]):
+    if cart is None:
+        return None
+    available = [sound for sound in cart.sounds if sound.available]
+    if not available:
+        return None
+    unused = [sound for sound in available if sound.id not in used]
+    if cart.mode is CartMode.RANDOM:
+        if not unused:
+            used.clear()
+            unused = list(available)
+        return choice(unused)
+    ordered = sorted(available, key=lambda sound: sound.rank or 0)
+    for sound in ordered:
+        if sound.id not in used and not sound.last_played:
+            return sound
+    for sound in ordered:
+        if sound.id not in used:
+            return sound
+    used.clear()
+    return ordered[0]
+
+
 async def _resolve_cart(
     session: ormSession,
     pos: ClockPosition,
     clock: Clock,
+    *,
+    carts: dict,
+    used_sounds: dict[int, set[int]],
 ) -> tuple[Sound | None, object | None, bool]:
     references = [
         (pos.cart_id, pos.cart_title),
@@ -175,9 +223,11 @@ async def _resolve_cart(
     for cart_id, title in references:
         if cart_id is None and not title:
             continue
-        cart = await _load_cart(session, title, cart_id=cart_id)
-        sound = _next_available_sound(cart)
+        cart = await _cached_cart(session, carts, cart_id, title)
+        used = used_sounds.setdefault(getattr(cart, "id", 0), set()) if cart else set()
+        sound = _next_preview_sound(cart, used)
         if sound and cart:
+            used.add(sound.id)
             rescue = (
                 (primary_id is not None and cart.id != primary_id)
                 or (primary_id is None and title != primary_title)
@@ -222,8 +272,16 @@ async def _prepare_cart(  # noqa: PLR0913
     at: datetime,
     when: str,
     daypart: str,
+    carts: dict,
+    used_sounds: dict[int, set[int]],
 ) -> tuple[dict, float] | None:
-    sound, cart, rescue = await _resolve_cart(session, pos, clock)
+    sound, cart, rescue = await _resolve_cart(
+        session,
+        pos,
+        clock,
+        carts=carts,
+        used_sounds=used_sounds,
+    )
     if sound is None or cart is None:
         cart_id, title = _clock_cart_ref(pos, clock)
         if title:
@@ -287,6 +345,8 @@ async def _prepare_sequential(  # noqa: PLR0913
     daypart: str,
     picked_artists: set[str],
     picked_titles: set[str],
+    carts: dict,
+    used_sounds: dict[int, set[int]],
 ) -> tuple[dict, float, str | None, str | None] | None:
     """Return (payload, duration, artist, title) for a sequential motif step."""
     if pos.kind == PositionKind.MUSIQUE.value:
@@ -299,7 +359,22 @@ async def _prepare_sequential(  # noqa: PLR0913
             extra_titles=picked_titles,
         )
         if item is None:
-            return None
+            payload = _item_payload(
+                at=at,
+                kind=pos.kind,
+                when="sequential",
+                resource="musique manquante",
+                queue=_queue_for(pos.kind, "sequential"),
+                status=STATUS_MISSING,
+                clock_name=clock.name,
+                daypart=daypart,
+                duration=DEFAULT_MUSIC_SEC,
+                category=pos.category.name if pos.category is not None else None,
+                clock_id=clock.id,
+                position_id=pos.id,
+            )
+            payload["reason"] = "aucun titre Beets"
+            return payload, DEFAULT_MUSIC_SEC, None, None
         length = _duration_seconds(getattr(item, "length", 0), DEFAULT_MUSIC_SEC)
         category_name = pos.category.name if pos.category is not None else None
         payload = _item_payload(
@@ -333,6 +408,8 @@ async def _prepare_sequential(  # noqa: PLR0913
             at=at,
             when="sequential",
             daypart=daypart,
+            carts=carts,
+            used_sounds=used_sounds,
         )
         if prepared is None:
             return None
@@ -401,6 +478,8 @@ async def build_rundown(  # noqa: PLR0912, PLR0915
     picked_artists: set[str] = set()
     picked_titles: set[str] = set()
     failures = 0
+    carts: dict = {}
+    used_sounds: dict[int, set[int]] = {}
 
     while t < hard_cap and len(items) < MAX_ITEMS:
         last_at = datetime.fromisoformat(items[-1]["at"]) if items else None
@@ -450,6 +529,8 @@ async def build_rundown(  # noqa: PLR0912, PLR0915
                 daypart=label,
                 picked_artists=picked_artists,
                 picked_titles=picked_titles,
+                carts=carts,
+                used_sounds=used_sounds,
             )
 
         if not sequential and upcoming is not None:
@@ -477,6 +558,8 @@ async def build_rundown(  # noqa: PLR0912, PLR0915
                     at=upcoming_soft[0],
                     when="anchored",
                     daypart=label,
+                    carts=carts,
+                    used_sounds=used_sounds,
                 )
                 if skipped is not None:
                     payload, _duration = skipped
@@ -492,6 +575,8 @@ async def build_rundown(  # noqa: PLR0912, PLR0915
                 at=anchor_dt,
                 when="anchored",
                 daypart=label,
+                carts=carts,
+                used_sounds=used_sounds,
             )
             if anchored_item is None:
                 t = max(t, anchor_dt + timedelta(seconds=1))
@@ -530,6 +615,8 @@ async def build_rundown(  # noqa: PLR0912, PLR0915
                 at=t,
                 when="anchored",
                 daypart=label,
+                carts=carts,
+                used_sounds=used_sounds,
             )
             if glided is not None:
                 soft_payload, soft_duration = glided

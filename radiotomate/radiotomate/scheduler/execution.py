@@ -18,16 +18,18 @@ from radiotomate.domain.errors import (
 from radiotomate.domain.execution import (
     ENGAGED_STATUSES,
     REPLACEABLE_STATUSES,
+    RESET_KEEP_STATUSES,
     naive_datetime,
     programming_fingerprint,
     rundown_summary,
     status_label,
 )
-from radiotomate.enums import PositionKind, RundownStatus, WhenMode
+from radiotomate.enums import CommandStatus, PositionKind, RundownStatus, WhenMode
 from radiotomate.models import (
     AutoDJSlot,
     Clock,
     MetadataLog,
+    PlayoutCommand,
     ProgrammingVersion,
     RundownItem,
     Setting,
@@ -361,14 +363,63 @@ async def clear_replaceable_forecast(session: ormSession) -> None:
     )
 
 
+async def clear_live_forecast(session: ormSession) -> None:
+    """Drop every rundown row except on-air and already played."""
+    doomed = list(
+        await session.scalars(
+            select(RundownItem).where(
+                RundownItem.status.notin_(list(RESET_KEEP_STATUSES)),
+            )
+        )
+    )
+    doomed_ids = [item.id for item in doomed]
+    commands = list(
+        await session.scalars(
+            select(PlayoutCommand).where(
+                PlayoutCommand.status.in_(
+                    [
+                        CommandStatus.PENDING.value,
+                        CommandStatus.SENDING.value,
+                    ]
+                )
+            )
+        )
+    )
+    if doomed_ids:
+        linked = list(
+            await session.scalars(
+                select(PlayoutCommand).where(
+                    PlayoutCommand.rundown_item_id.in_(doomed_ids),
+                )
+            )
+        )
+        seen = {command.id for command in commands}
+        for command in linked:
+            if command.id not in seen:
+                commands.append(command)
+    for command in commands:
+        command.rundown_item_id = None
+        if command.status in {
+            CommandStatus.PENDING.value,
+            CommandStatus.SENDING.value,
+        }:
+            command.status = CommandStatus.EXPIRED.value
+            command.last_error = "conducteur reset"
+    if doomed_ids:
+        await session.flush()
+        await session.execute(
+            delete(RundownItem).where(RundownItem.id.in_(doomed_ids))
+        )
+
+
 async def reset_conducteur(
     session: ormSession,
     beets: BeetsIntegration,
     horizon_min: int = 30,
 ) -> dict:
-    """Reset motif cursor, drop replaceable forecast, rebuild from now."""
+    """Reset motif cursor, drop queued forecast, rebuild from now."""
     await reset_sequencer(session, commit=False)
-    await clear_replaceable_forecast(session)
+    await clear_live_forecast(session)
     await session.commit()
     payload = await preview_rundown(session, beets, horizon_min=horizon_min)
     payload["action"] = "reset"

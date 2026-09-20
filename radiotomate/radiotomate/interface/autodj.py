@@ -1,5 +1,4 @@
 import logging
-from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from random import randint, sample
@@ -169,6 +168,19 @@ def _wants_conducteur_reset(data: dict) -> bool:
     return str(data.get("action") or "").strip().lower() == "reset"
 
 
+async def _follow_conducteur_reset() -> None:
+    """Drop demo forecast and empty Liquidsoap queues (keep the on-air title)."""
+    try:
+        scheduler = Scheduler.get()
+    except RuntimeError:
+        return
+    scheduler.discard_forecast()
+    try:
+        await scheduler.flush_queues()
+    except Exception:
+        _log.warning("flush queues after conducteur reset failed", exc_info=True)
+
+
 async def _conducteur_payload(*, force: bool = False) -> dict:
     beets = BeetsIntegration.get()
     horizon = _conducteur_horizon()
@@ -247,8 +259,7 @@ async def conducteur_rebuild_json():
             beets,
             horizon_min=_conducteur_horizon(),
         )
-        with suppress(RuntimeError):
-            Scheduler.get().discard_forecast()
+        await _follow_conducteur_reset()
         _conducteur_cache[_conducteur_horizon()] = (monotonic(), payload)
         return jsonify(await attach_desk_pins(g.dbsession, payload))
     payload = await _conducteur_payload(force=True)

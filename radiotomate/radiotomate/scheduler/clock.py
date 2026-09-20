@@ -488,6 +488,9 @@ async def tick(  # noqa: PLR0912, PLR0915
             item = await _pick_music(session, beets, pos, now)
             if item is None:
                 _log.warning("No Beets track for clock position %s", pos.id)
+                if autodj_q == 0:
+                    _state.cursor += 1
+                    continue
                 break
             length = float(getattr(item, "length", 0) or 0)
             if next_anchor is not None and track_would_overflow_anchor(

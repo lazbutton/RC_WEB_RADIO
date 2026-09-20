@@ -767,3 +767,12 @@ html {
   color: var(--suite-paper) !important;
   border: 1px solid var(--suite-border) !important;
 }
+
+.bank-attach {
+  margin: 1rem 0 1.25rem;
+  max-width: 42rem;
+}
+
+.bank-attach .title {
+  margin-bottom: 0.35rem;
+}

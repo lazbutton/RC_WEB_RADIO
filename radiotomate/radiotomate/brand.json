@@ -30,9 +30,6 @@
       "subtitle": "Console d’antenne",
       "login": "Accès studio"
     },
-    "festival": {
-      "title": "Grille NTF#4"
-    },
     "inbox": {
       "title": "Inbox Zero",
       "org": "{name}"
@@ -102,9 +99,6 @@
       "nowUrl": "http://127.0.0.1:6820/now.json",
       "icecastStatusUrl": "http://127.0.0.1:18000/status-json.xsl",
       "festivalUrl": "https://newtradfest.com/"
-    },
-    "festival": {
-      "url": "http://127.0.0.1:8765/festival/"
     }
   },
   "tailscaleBase": "http://nasgul.taild4714f.ts.net",

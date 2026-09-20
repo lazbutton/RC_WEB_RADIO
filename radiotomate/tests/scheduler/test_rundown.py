@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as ormSession
@@ -239,9 +240,12 @@ async def test_rundown_replays_exhausted_playlist_jingles(
     jingles_cart,
 ):
     from radiotomate.enums import CartMode
+    from radiotomate.models import Cart
 
-    jingles_cart.mode = CartMode.PLAYLIST
-    for sound in jingles_cart.sounds:
+    cart = await Cart.from_id(dbsession, jingles_cart.id, load_sounds=True)
+    assert cart is not None
+    cart.mode = CartMode.PLAYLIST
+    for sound in cart.sounds:
         sound.last_played = datetime.now()
     await dbsession.commit()
     data = await build_rundown(
@@ -255,7 +259,74 @@ async def test_rundown_replays_exhausted_playlist_jingles(
     first = jingles[0]
     assert first["status"] != "manquant"
     assert first["resource"] == "ID BUTTON"
-    assert first["reason"] != "cart introuvable"
+    assert first.get("reason") != "cart introuvable"
+
+
+async def test_rundown_keeps_music_slot_when_beets_empty(
+    dbsession: ormSession,
+    beets_integration: BeetsIntegration,
+    jingles_cart,
+):
+    with patch(
+        "radiotomate.scheduler.rundown._pick_music",
+        AsyncMock(return_value=None),
+    ):
+        data = await build_rundown(
+            dbsession,
+            beets_integration,
+            now=datetime(2026, 9, 14, 0, 30, tzinfo=PARIS),
+            horizon_min=30,
+            cursor=0,
+        )
+    items = data["items"]
+    jingles = [item for item in items if item.get("kind") == "jingle"]
+    missing = [
+        item
+        for item in items
+        if item.get("kind") == "musique" and item.get("status") == "manquant"
+    ]
+    assert missing, items[:8]
+    assert jingles
+    assert len(jingles) < len(items) / 2
+    assert len(jingles) < 40
+
+
+async def test_rundown_rotates_playlist_jingles(
+    dbsession: ormSession,
+    beets_integration: BeetsIntegration,
+    jingles_cart,
+):
+    from radiotomate.enums import CartMode
+    from radiotomate.models import Sound
+
+    jingles_cart.mode = CartMode.PLAYLIST
+    for rank, title in ((2, "Virgule"), (3, "ID nuit")):
+        dbsession.add(
+            Sound(
+                cart_id=jingles_cart.id,
+                path=jingles_cart.path / f"{title}.mp3",
+                duration=8,
+                title=title,
+                rank=rank,
+                gain=-1.0,
+                peak=-0.5,
+            )
+        )
+    await dbsession.commit()
+    dbsession.expire(jingles_cart, ["sounds"])
+    data = await build_rundown(
+        dbsession,
+        beets_integration,
+        now=datetime(2026, 9, 14, 0, 30, tzinfo=PARIS),
+        horizon_min=60,
+        cursor=0,
+    )
+    names = [
+        item.get("resource")
+        for item in data["items"]
+        if item.get("kind") == "jingle" and item.get("status") != "manquant"
+    ]
+    assert len(set(names)) >= 2, names[:8]
 
 
 async def test_reset_sequencer_reloads_after_process_restart(

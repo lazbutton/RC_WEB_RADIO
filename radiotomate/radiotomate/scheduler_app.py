@@ -23,6 +23,7 @@ from radiotomate.db import PathLike, QuartAlchemy
 from radiotomate.quart import CustomQuart, ShutdownError
 from radiotomate.scheduler import (
     analyzer,
+    bank_sync,
     harbor,
     health,
     live,
@@ -142,6 +143,7 @@ def app_factory(config: dict, beets: BeetsIntegration) -> CustomQuart:
         app.add_background_task(beets.background_analyzer, db)
         if app.config.get("QUEUE_CLEAN_ENABLED", True):
             app.add_background_task(queue_cleaner.loop, app)
+        app.add_background_task(bank_sync.loop, app)
 
     auth_manager = QuartAuth()
     auth_manager.user_class = RadiotomateAuth

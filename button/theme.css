@@ -1,0 +1,22 @@
+/* BUTTON — charte sombre noir / blanc / gris.
+   Couleur hors de cette feuille : player console + ON AIR / VU / erreur. */
+
+:root {
+  --bg: #0a0a0a;
+  --surface-1: #121212;
+  --surface-2: #1a1a1a;
+  --surface-3: #242424;
+  --border: rgb(255 255 255 / 0.10);
+  --text: #f5f5f5;
+  --muted: #a3a3a3;
+  --faint: #737373;
+  --accent: #f5f5f5;
+  --accent-hover: #ffffff;
+  --ink: #0a0a0a;
+  --live: #ff4d4d;
+  --ok: #3ecf8e;
+  --vu-ok: #3ecf8e;
+  --vu-warn: #f0e24a;
+  --vu-hot: #ff7a45;
+  --vu-clip: #ff4d4d;
+}

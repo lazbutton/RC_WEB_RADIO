@@ -62,12 +62,16 @@ def _cue(value: object) -> dict | None:
         rid = -1
     if rid < 0:
         return None
-    return {
+    cue = {
         "title": str(parsed.get("title") or "").strip(),
         "artist": str(parsed.get("artist") or "").strip(),
         "rid": rid,
         "initial_uri": str(parsed.get("initial_uri") or ""),
     }
+    duration = _float_field(parsed.get("duration"), 0.0)
+    if duration > 0:
+        cue["duration"] = duration
+    return cue
 
 
 def normalize_live(md: dict) -> dict:
@@ -85,6 +89,7 @@ def normalize_live(md: dict) -> dict:
         "kind": str(md.get("kind") or ""),
         "remaining": _float_field(md.get("remaining")),
         "elapsed": _float_field(md.get("elapsed")),
+        "duration": _float_field(md.get("duration")),
         "on_air": str(md.get("on_air") or md.get("time") or ""),
         "next_autodj": _cue(md.get("next_autodj")),
         "next_jingle": _cue(md.get("next_jingle")),

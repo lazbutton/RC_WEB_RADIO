@@ -994,6 +994,7 @@ async def test_cart_attach_bank_path_json(  # noqa: PLR0913
     assert attached.status_code == 201, await attached.get_data(as_text=True)
     sounds = (await attached.get_json())["cart"]["sounds"]
     assert len(sounds) == 1
+    assert sounds[0]["path"].endswith("jingle_button_ouverture.mp3")
     blocked = await client.post(
         f"/carts/{cart_id}/sounds.json",
         json={"paths": ["00-inbox/rotation/secret.mp3"]},
@@ -1095,6 +1096,11 @@ async def test_cart_attach_rotation_folders_json(  # noqa: PLR0913
         json={"title": "Mix Cart", "mode": "playlist", "schedule_mode": "timed"},
     )
     cart_id = (await created.get_json())["cart"]["id"]
+    page = await client.get(f"/carts/{cart_id}/sounds")
+    html = await page.get_data(as_text=True)
+    assert page.status_code == 200
+    assert "Depuis la banque" in html
+    assert "Copier dans le cart" in html
     attached = await client.post(
         f"/carts/{cart_id}/sounds.json?delta=1",
         json={"folders": ["10-rotation/jazz", "10-rotation/soul"]},
@@ -1105,6 +1111,73 @@ async def test_cart_attach_rotation_folders_json(  # noqa: PLR0913
         json={"paths": ["10-rotation/jazz/coltrane.mp3"]},
     )
     assert blocked_file.status_code == 400
+
+
+async def test_cart_bank_folder_sync_once(  # noqa: PLR0913
+    raw_app,
+    app_configration: dict,
+    beets_integration: BeetsIntegration,
+    dbsession: ormSession,
+    users_password: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from radiotomate.models import Cart, User
+    from radiotomate.services.carts import sync_bank_folder
+
+    media = tmp_path / "media"
+    jingles = media / "30-habillage" / "jingles"
+    jingles.mkdir(parents=True)
+    mp3 = ASSETS / "ohradiotomateoh.mp3"
+    (jingles / "one.mp3").write_bytes(mp3.read_bytes())
+    monkeypatch.setenv("MEDIA_ROOT", str(media))
+
+    client = await _admin_client(
+        app_configration,
+        beets_integration,
+        dbsession,
+        users_password,
+        "cart-bank-sync",
+    )
+    created = await client.post(
+        "/carts.json",
+        json={"title": "Finder Cart", "mode": "playlist", "schedule_mode": "timed"},
+    )
+    assert created.status_code == 201, await created.get_data(as_text=True)
+    cart_id = (await created.get_json())["cart"]["id"]
+    assert (await created.get_json())["cart"]["bank_folder"] == ""
+    blocked = await client.put(
+        f"/carts/{cart_id}.json",
+        json={"bank_folder": "10-rotation"},
+    )
+    assert blocked.status_code == 400
+    inbox = await client.put(
+        f"/carts/{cart_id}.json",
+        json={"bank_folder": "00-inbox/habillage/jingles"},
+    )
+    assert inbox.status_code == 400
+    mapped = await client.put(
+        f"/carts/{cart_id}.json",
+        json={"bank_folder": "30-habillage/jingles"},
+    )
+    assert mapped.status_code == 200, await mapped.get_data(as_text=True)
+    assert (await mapped.get_json())["cart"]["bank_folder"] == "30-habillage/jingles"
+
+    dbsession.expire_all()
+    cart = await Cart.from_id(dbsession, cart_id, load_sounds=True)
+    user = await User.from_username(dbsession, "cart-bank-sync")
+    assert cart is not None and user is not None
+    first = await sync_bank_folder(dbsession, cart, user.id)
+    await dbsession.commit()
+    assert [sound.title for sound in first] == ["one.mp3"]
+    second = await sync_bank_folder(dbsession, cart, user.id)
+    await dbsession.commit()
+    assert second == []
+    dbsession.expire_all()
+    cart = await Cart.from_id(dbsession, cart_id, load_sounds=True)
+    assert cart is not None
+    assert [sound.title for sound in cart.sounds] == ["one.mp3"]
+    assert "30-habillage/jingles/one.mp3" in str(cart.sounds[0].path)
 
 
 async def test_spa_serves_console_dist(
@@ -1147,8 +1220,8 @@ async def test_conducteur_post_refresh_and_reset(  # noqa: PLR0913
     users_password: str,
     jingles_cart,
 ):
-    from radiotomate.enums import RundownStatus
-    from radiotomate.models import Setting
+    from radiotomate.enums import CommandStatus, PlayoutAction, RundownStatus
+    from radiotomate.models import PlayoutCommand, Setting
     from radiotomate.scheduler.clock import (
         SETTING_CLOCK_SEQ_CLOCK_ID,
         SETTING_CLOCK_SEQ_CURSOR,
@@ -1197,6 +1270,31 @@ async def test_conducteur_post_refresh_and_reset(  # noqa: PLR0913
             status=RundownStatus.ON_AIR.value,
         )
     )
+    dbsession.add(
+        RundownItem(
+            id="ri-conducteur-queued",
+            programming_version_id="pv-conducteur-reset",
+            sequence=2,
+            planned_at=datetime.now(),
+            duration=8,
+            kind="jingle",
+            when_mode="sequential",
+            queue="jingles",
+            resource="jingle en file",
+            status=RundownStatus.IN_QUEUE.value,
+        )
+    )
+    dbsession.add(
+        PlayoutCommand(
+            id="pc-conducteur-queued",
+            rundown_item_id="ri-conducteur-queued",
+            action=PlayoutAction.QUEUE.value,
+            queue="jingles",
+            payload={"path": "/tmp/jingle.mp3"},
+            idempotency_key="reset-queued-jingle",
+            status=CommandStatus.PENDING.value,
+        )
+    )
     await dbsession.commit()
 
     refresh = await client.post("/autodj/conducteur.json", json={})
@@ -1229,9 +1327,14 @@ async def test_conducteur_post_refresh_and_reset(  # noqa: PLR0913
     assert epoch_row is not None
     assert int(epoch_row.value) >= 1
     assert await dbsession.get(RundownItem, "ri-conducteur-planned") is None
+    assert await dbsession.get(RundownItem, "ri-conducteur-queued") is None
     on_air = await dbsession.get(RundownItem, "ri-conducteur-onair")
     assert on_air is not None
     assert on_air.status == RundownStatus.ON_AIR.value
+    queued_cmd = await dbsession.get(PlayoutCommand, "pc-conducteur-queued")
+    assert queued_cmd is not None
+    assert queued_cmd.status == CommandStatus.EXPIRED.value
+    assert queued_cmd.rundown_item_id is None
 
 
 async def test_conducteur_post_forbidden_without_autodj(  # noqa: PLR0913

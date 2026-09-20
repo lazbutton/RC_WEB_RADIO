@@ -1,0 +1,6 @@
+*
+!dist/
+!nginx.conf
+!Dockerfile
+!compose.yml
+!brand.json

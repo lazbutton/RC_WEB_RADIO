@@ -107,6 +107,19 @@ class Scheduler:
     def discard_forecast(self) -> None:
         return
 
+    async def flush_queues(self) -> None:
+        try:
+            result = await self.client.post("/queues/flush")
+        except httpx.HTTPError as exc:
+            _log.warning("flush queues failed: %s", exc)
+            return
+        if result.status_code != 200:
+            _log.warning(
+                "flush queues HTTP %s: %s",
+                result.status_code,
+                result.text,
+            )
+
     async def live(self) -> AsyncGenerator[dict, None]:
         sleeptime = 10
         while True:
@@ -501,6 +514,10 @@ class SchedulerDemo(Scheduler):
     def discard_forecast(self) -> None:
         self._forecast = []
         self._forecast_horizon = 0
+
+    async def flush_queues(self) -> None:
+        self.discard_forecast()
+        self._played = []
 
     async def live_rundown(
         self,

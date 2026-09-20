@@ -71,6 +71,15 @@ class PlayoutGateway:
             "/queue/clean",
             json={"max_age_seconds": max_age_seconds},
         )
+        self._record_queue_removals(result)
+        return result
+
+    async def flush_queues(self) -> PlayoutResult:
+        result = await self._request("POST", "/queue/flush")
+        self._record_queue_removals(result)
+        return result
+
+    def _record_queue_removals(self, result: PlayoutResult) -> None:
         payload = result.payload if isinstance(result.payload, dict) else {}
         for queue in ("autodj", "jingles", "carts"):
             info = payload.get(queue)
@@ -81,7 +90,6 @@ class PlayoutGateway:
             except (TypeError, ValueError):
                 removed = 0
             runtime_metrics.record_queue_clean(queue, removed)
-        return result
 
     async def _request(
         self,

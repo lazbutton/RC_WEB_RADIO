@@ -49,6 +49,7 @@ class Cart(Base):
     average_duration: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_duration: Mapped[int] = mapped_column(Integer)
     notes: Mapped[str] = mapped_column(String, nullable=False, default="")
+    bank_folder: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     created: Mapped[datetime] = mapped_column(DATETIME, default=datetime.now)
     modified: Mapped[datetime] = mapped_column(
         DATETIME,

@@ -37,6 +37,11 @@ REPLACEABLE_STATUSES = {
     RundownStatus.REPLACED.value,
 }
 
+RESET_KEEP_STATUSES = {
+    RundownStatus.ON_AIR.value,
+    RundownStatus.PLAYED.value,
+}
+
 
 def status_label(status: str) -> str:
     return STATUS_LABELS.get(status, status)

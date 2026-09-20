@@ -47,3 +47,27 @@ async def test_run_clean_playout_error(raw_app: CustomQuart):
             result = await run_clean(raw_app)
     assert result["ok"] is False
     assert result["error"] == "playout_unavailable"
+
+
+async def test_flush_queues_records_removed_counts(raw_app: CustomQuart):
+    payload = {
+        "autodj": {"removed": 3, "kept": 1},
+        "jingles": {"removed": 12, "kept": 0},
+        "carts": {"removed": 0, "kept": 1},
+    }
+    response = httpx.Response(200, json=payload)
+    with patch.object(
+        PlayoutGateway,
+        "_call",
+        new=AsyncMock(return_value=response),
+    ) as mocked:
+        async with raw_app.test_app():
+            gateway = PlayoutGateway(raw_app.config["PLAYOUT_CLIENT"])
+            result = await gateway.flush_queues()
+    assert result.ok is True
+    mocked.assert_awaited()
+    assert mocked.await_args.args[0] == "POST"
+    assert mocked.await_args.args[1] == "/queue/flush"
+    snapshot = runtime_metrics.snapshot()["queue_clean_removed_total"]
+    assert snapshot["autodj"] == 3
+    assert snapshot["jingles"] == 12

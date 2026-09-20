@@ -526,3 +526,28 @@ async def test_schedule_to_autodj(
                 "rg_track_gain": str(fake_sound.gain),
             },
         )
+
+
+async def test_queues_flush(
+    client: QuartClient,
+    auth: dict,
+):
+    from unittest.mock import AsyncMock
+
+    from radiotomate.scheduler.playout import PlayoutGateway
+
+    payload = {
+        "autodj": {"removed": 1, "kept": 1},
+        "jingles": {"removed": 5, "kept": 0},
+        "carts": {"removed": 0, "kept": 0},
+    }
+    with patch.object(
+        PlayoutGateway,
+        "_call",
+        new=AsyncMock(return_value=httpx.Response(200, json=payload)),
+    ):
+        result = await client.post("/queues/flush", headers=auth)
+    assert result.status_code == 200, await result.get_data(as_text=True)
+    body = await result.get_json()
+    assert body["ok"] is True
+    assert body["queues"]["jingles"]["removed"] == 5
