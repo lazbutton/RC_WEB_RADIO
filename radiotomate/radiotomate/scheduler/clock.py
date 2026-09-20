@@ -365,12 +365,21 @@ def track_would_overflow_anchor(
 
 
 def can_push_sequential_jingle(live_data: dict) -> bool:
-    """Avoid cutting a title mid-way; hard anchors still cut separately."""
+    """Avoid cutting a title mid-way; hard anchors still cut separately.
+
+    Ne jamais enchaîner un jingle pendant qu’un jingle/cart est à l’antenne :
+    le fallback Liquidsoap resterait collé sur cette file.
+    """
     src = source_id(live_data)
     remaining = remaining_seconds(live_data)
-    if src == "autodj" and remaining > JINGLE_PREEMPT_REMAINING:
+    if src in {"jingles", "carts", "stream", "relay"}:
         return False
-    return not (src in {"jingles", "carts"} and remaining > 0.5)
+    autodj_q = queued_count(live_data, "autodj_queued", "next_autodj")
+    if autodj_q > 0 and remaining <= 0:
+        return False
+    if remaining > JINGLE_PREEMPT_REMAINING:
+        return False
+    return True
 
 
 def sequential_kind_cycle(clock: Clock) -> list[str]:

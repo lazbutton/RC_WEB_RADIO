@@ -207,6 +207,30 @@ async def test_insert_initial_source_does_not_refill_jingles(
     client.post.assert_not_called()
 
 
+async def test_does_not_chain_jingles_when_current_jingle_ends(
+    dbsession: ormSession,
+    jingles_cart: Cart,
+    beets_integration: BeetsIntegration,
+):
+    client = _client()
+    actions = await tick(
+        dbsession,
+        _live(
+            NIGHT,
+            source="jingles",
+            remaining="0.2",
+            next_jingle={"rid": -1},
+            next_autodj={"rid": 1},
+            jingles_queued=0,
+            autodj_queued=2,
+        ),
+        client,
+        beets_integration,
+    )
+    assert "jingle" not in actions
+    assert all(not str(c.args[0]).endswith("/jingles") for c in client.post.call_args_list)
+
+
 async def test_autodj_fills_while_cart_is_on_air(
     dbsession: ormSession,
     jingles_cart: Cart,
