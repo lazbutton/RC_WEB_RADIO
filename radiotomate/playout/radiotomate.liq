@@ -235,7 +235,7 @@ end
 programs = fallback([stream,   relay,     carts,        autodj,        blank()],
   transitions=[crossfade_3s, crossfade_3s, crossfade_3s, crossfade_3s, crossfade_3s],
   track_sensitive=false,
-  replay_metadata=false,
+  replay_metadata=true,
   id="programs")
 
 def mark_jingles_on_air(_, b)
@@ -256,7 +256,7 @@ end
 programs_and_jingles = fallback([jingles, programs],
   transitions=[mark_jingles_on_air, mark_programs_on_air],
   id="programs_and_jingles",
-  replay_metadata=false
+  replay_metadata=true
 )
 
 
