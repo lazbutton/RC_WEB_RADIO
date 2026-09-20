@@ -23,10 +23,12 @@ from radiotomate.scheduler.execution import (
     reorder_desk_items,
     reset_conducteur,
 )
+from radiotomate.scheduler.clock import now_paris
 from radiotomate.scheduler.rundown import (
     DEFAULT_HORIZON_MIN,
     MAX_HORIZON_MIN,
     MIN_HORIZON_MIN,
+    forecast_still_covers,
 )
 from radiotomate.scheduler_api import Scheduler
 from radiotomate.services.autodj import (
@@ -45,7 +47,6 @@ blueprint = Blueprint("autodj", __name__, template_folder="templates")
 
 REM_PER_HOUR = 4
 MIN_PER_DAY = 24 * 60
-CONDUCTEUR_CACHE_TTL = 8.0
 _conducteur_cache: dict[int, tuple[float, dict]] = {}
 
 
@@ -186,8 +187,10 @@ async def _conducteur_payload(*, force: bool = False) -> dict:
     horizon = _conducteur_horizon()
     if not force:
         cached = _conducteur_cache.get(horizon)
-        if cached and monotonic() - cached[0] < CONDUCTEUR_CACHE_TTL:
-            return await attach_desk_pins(g.dbsession, cached[1])
+        if cached and forecast_still_covers(cached[1], now_paris()):
+            payload = dict(cached[1])
+            payload["now"] = now_paris().isoformat()
+            return await attach_desk_pins(g.dbsession, payload)
     try:
         scheduler = Scheduler.get()
         payload = await scheduler.live_rundown(

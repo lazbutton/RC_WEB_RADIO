@@ -18,6 +18,7 @@ from radiotomate.scheduler.clock import (
 from radiotomate.scheduler.rundown import (
     MAX_HORIZON_MIN,
     build_rundown,
+    forecast_still_covers,
     rest_of_day_minutes,
 )
 from tests.scheduler.test_clock import NIGHT, _client, _live
@@ -33,6 +34,62 @@ def test_rest_of_day_minutes_until_midnight():
     late = datetime(2026, 9, 15, 23, 0, tzinfo=PARIS)
     assert rest_of_day_minutes(late) == 4 * 60
     assert rest_of_day_minutes(morning) <= MAX_HORIZON_MIN
+
+
+def test_forecast_still_covers_until_the_tail_elapses():
+    now = datetime(2026, 9, 20, 13, 0, tzinfo=PARIS)
+    payload = {
+        "items": [
+            {"at": now.isoformat(), "duration": 81},
+            {"at": (now + timedelta(seconds=81)).isoformat(), "duration": 81},
+        ]
+    }
+    assert forecast_still_covers(payload, now, min_ahead_min=1)
+    assert not forecast_still_covers(
+        payload,
+        now + timedelta(minutes=5),
+        min_ahead_min=1,
+    )
+    assert not forecast_still_covers({"items": []}, now)
+
+
+async def test_conducteur_json_keeps_times_across_polls(  # noqa: PLR0913
+    raw_app,
+    app_configration: dict,
+    beets_integration: BeetsIntegration,
+    dbsession: ormSession,
+    users_password: str,
+    jingles_cart,
+    pubs_cart,
+):
+    user = User(username="conducteur-stable")
+    user.update_password(users_password)
+    dbsession.add(user)
+    await dbsession.commit()
+
+    from radiotomate.interface import autodj as autodj_mod
+    from radiotomate.interface_app import app_factory as interface_factory
+
+    iface = interface_factory(app_configration, False, beets_integration)
+    iface.config["INTERFACE_NAME"] = "BUTTON"
+    client = iface.test_client()
+    login = await client.post(
+        "/login",
+        form={"username": "conducteur-stable", "password": users_password},
+    )
+    assert login.status_code == 302
+    first = await (await client.get("/autodj/conducteur.json")).get_json()
+    assert first["items"]
+    horizon = first["horizon_min"]
+    stamped, payload = autodj_mod._conducteur_cache[horizon]
+    autodj_mod._conducteur_cache[horizon] = (stamped - 60.0, payload)
+    second = await (await client.get("/autodj/conducteur.json")).get_json()
+    assert [item["at"] for item in first["items"][:8]] == [
+        item["at"] for item in second["items"][:8]
+    ]
+    assert [item["resource"] for item in first["items"][:8]] == [
+        item["resource"] for item in second["items"][:8]
+    ]
 
 
 def _anchored_pubs(items: list[dict], minute: int = 20) -> list[dict]:

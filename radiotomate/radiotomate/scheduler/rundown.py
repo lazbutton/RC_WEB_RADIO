@@ -39,6 +39,45 @@ STATUS_RESCUE = "secours"
 STATUS_MISSING = "manquant"
 
 
+def item_end_at(item: dict) -> datetime | None:
+    raw = item.get("at")
+    if not raw:
+        return None
+    try:
+        start = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    try:
+        duration = float(item.get("duration") or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    return start + timedelta(seconds=max(0.0, duration))
+
+
+def forecast_still_covers(
+    payload: dict,
+    now: datetime | None = None,
+    *,
+    min_ahead_min: int = 15,
+) -> bool:
+    """True if the cached rundown still has enough future, so we must not rebuild from *now*."""
+    now = now_paris(now)
+    last_end = None
+    for item in payload.get("items") or []:
+        end = item_end_at(item)
+        if end is None:
+            continue
+        if end.tzinfo is None and now.tzinfo is not None:
+            end = end.replace(tzinfo=now.tzinfo)
+        elif end.tzinfo is not None and now.tzinfo is None:
+            now = now.replace(tzinfo=end.tzinfo)
+        if last_end is None or end > last_end:
+            last_end = end
+    if last_end is None:
+        return False
+    return last_end >= now + timedelta(minutes=max(1, min_ahead_min))
+
+
 def rest_of_day_minutes(now: datetime | None = None) -> int:
     """Minutes until midnight, at least 4 h so late evening still has lookahead."""
     now = now_paris(now)
