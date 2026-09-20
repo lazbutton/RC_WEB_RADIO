@@ -1,10 +1,11 @@
 import logging
 from contextlib import suppress
 from datetime import datetime
+from pathlib import Path
 from random import randint, sample
 from time import monotonic
 
-from quart import Blueprint, g, jsonify, render_template, request, url_for
+from quart import Blueprint, g, jsonify, render_template, request, send_file, url_for
 from werkzeug.datastructures import MultiDict
 from werkzeug.exceptions import BadRequest, Conflict, NotFound
 
@@ -193,6 +194,38 @@ async def _conducteur_payload(*, force: bool = False) -> dict:
 @login_required
 async def conducteur_json():
     return jsonify(await _conducteur_payload())
+
+
+def _beets_filepath(item) -> Path | None:
+    raw = getattr(item, "filepath", None) or getattr(item, "path", None)
+    if raw is None:
+        return None
+    if isinstance(raw, Path):
+        path = raw
+    elif isinstance(raw, bytes):
+        path = Path(raw.decode())
+    else:
+        path = Path(str(raw))
+    return path if path.is_file() else None
+
+
+@blueprint.get("/autodj/beets/<int:item_id>")
+@login_required
+async def beets_file(item_id: int):
+    beets = BeetsIntegration.get()
+    item = beets.lib.get_item(item_id)
+    if item is None:
+        raise NotFound()
+    path = _beets_filepath(item)
+    if path is None:
+        raise NotFound()
+    return await send_file(
+        path,
+        mimetype="audio/mpeg",
+        conditional=True,
+        as_attachment=True,
+        attachment_filename=path.name,
+    )
 
 
 @blueprint.post("/autodj/conducteur.json")

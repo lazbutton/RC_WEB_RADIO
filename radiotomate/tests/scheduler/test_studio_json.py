@@ -104,3 +104,54 @@ async def test_studio_json_authenticated(  # noqa: PLR0913
     assert jingles["sounds"]
     assert "path" not in jingles
     assert "path" not in jingles["sounds"][0]
+
+
+async def test_autodj_beets_file_requires_login(
+    raw_app,
+    app_configration: dict,
+    beets_integration: BeetsIntegration,
+):
+    client = _interface_client(app_configration, beets_integration)
+    response = await client.get("/autodj/beets/1")
+    assert response.status_code == 302
+    assert "/login" in (response.headers.get("Location") or "")
+
+
+async def test_autodj_beets_file_streams_mp3(  # noqa: PLR0913
+    raw_app,
+    app_configration: dict,
+    beets_integration: BeetsIntegration,
+    dbsession: ormSession,
+    users_password: str,
+    tmp_path,
+):
+    mp3 = tmp_path / "hit.mp3"
+    mp3.write_bytes(b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\xff\xfb\x90\x00" * 80)
+    added = beets_integration.helper.add_item(
+        artist="File Tester",
+        title="Hit",
+        grouping="rotation",
+        path=str(mp3),
+    )
+    item_id = int(getattr(added, "id", 0) or 0)
+    if item_id <= 0:
+        items = list(beets_integration.lib.items())
+        item_id = int(items[-1].id)
+
+    user = User(username="beets-file")
+    user.update_password(users_password)
+    dbsession.add(user)
+    await dbsession.commit()
+
+    client = _interface_client(app_configration, beets_integration)
+    await _login(client, "beets-file", users_password)
+
+    missing = await client.get("/autodj/beets/999999")
+    assert missing.status_code == 404
+
+    response = await client.get(f"/autodj/beets/{item_id}")
+    assert response.status_code == 200
+    body = await response.get_data()
+    assert body[:3] == b"ID3"
+    assert "audio" in (response.headers.get("Content-Type") or "")
+
