@@ -280,6 +280,9 @@ class Notifier:
         self.settings = settings
         self.client = client or httpx.AsyncClient(timeout=10.0)
         self._vikunja_jwt: str | None = None
+        # kind -> open Vikunja task id, so the recovery closes it instead of
+        # piling a second "[RÉTABLI]" task next to the alert.
+        self._vikunja_open: dict[str, int] = {}
 
     async def send(
         self, *, kind: str, resolved: bool, title: str, body: str, host: str
@@ -329,12 +332,30 @@ class Notifier:
             project_id = 0
         if project_id <= 0:
             return
+        kind = str(payload["kind"])
+        headers = await self._vikunja_headers()
+        if payload["resolved"] and kind in self._vikunja_open:
+            task_id = self._vikunja_open.pop(kind)
+            response = await self.client.post(
+                f"{base}/api/v1/tasks/{task_id}",
+                json={
+                    "done": True,
+                    "description": payload["body"].replace("\n", "<br>"),
+                },
+                headers=headers,
+            )
+            if response.status_code < 400:
+                return
+            _log.warning(
+                "vikunja: cannot close task %s (%s), creating a recovery task",
+                task_id,
+                response.status_code,
+            )
         task = {
             "title": payload["title"],
             "description": payload["body"].replace("\n", "<br>"),
             "done": bool(payload["resolved"]),
         }
-        headers = await self._vikunja_headers()
         response = await self.client.put(
             f"{base}/api/v1/projects/{project_id}/tasks", json=task, headers=headers
         )
@@ -346,6 +367,10 @@ class Notifier:
                 headers=headers,
             )
         response.raise_for_status()
+        if not payload["resolved"]:
+            created_id = response.json().get("id")
+            if created_id:
+                self._vikunja_open[kind] = int(created_id)
         try:
             label_id = int(conf.get("label_id") or 0)
         except (TypeError, ValueError):

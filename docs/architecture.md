@@ -48,8 +48,9 @@ Tout est en HTTP sur le LAN + Tailscale ; TLS (Caddyfile dans `button-ops`) pas 
 
 - `GET /health/ready` scheduler : DB + heartbeat Liquidsoap < 5 s + playout joignable → healthcheck compose et garde du déploiement.
 - `GET /metrics` scheduler : compteurs persistés dans `/data/metrics.json` (rechargés au redémarrage) + une ligne par heure dans `/data/exports/metrics.jsonl`.
-- Alertes (`alerts:` dans `radiotomate.yaml`) : silence, playout injoignable, heartbeat perdu → log, webhook, tâche Vikunja.
+- Alertes (`alerts:` dans `radiotomate.yaml`) : silence, playout injoignable, heartbeat perdu, créneau live sans encodeur (EF-01), sortie Icecast déconnectée (`icecast_down`, locale ou relais public) → log, webhook, tâche Vikunja.
 - Rétention (`retention:`) : conducteur joué > 7 j, commandes acquittées > 24 h, versions de programmation orphelines, `metadata_log` > 90 j exporté en JSONL avant purge.
+- Heures : tout est en **heure de Paris naïve** (`planned_at`, `metadata_log.on_air`, `created`). Les conteneurs ont `TZ=Europe/Paris` depuis le 21/09/2026 19:40 ; avant, `created`/`reserved_at`/`on_air` étaient en UTC → le `metadata_log` saute de 17:30 à 19:40 ce jour-là (2 h de « trou » apparent, pas de silence réel). Le conducteur se recale sur l'as-run à chaque passage à l'antenne (`realign_rundown`), et les items `failed` ne comptent jamais comme couverture de prévision.
 
 ## Icecast depuis un conteneur
 

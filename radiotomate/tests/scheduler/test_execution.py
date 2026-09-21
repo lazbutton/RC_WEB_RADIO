@@ -159,7 +159,9 @@ async def test_published_rundown_is_stable_source(
         now=datetime(2026, 9, 15, 10, 19, tzinfo=PARIS),
     )
     assert first["programming_version"] == second["programming_version"]
-    assert [item["id"] for item in first["items"]] == [item["id"] for item in second["items"]]
+    assert [item["id"] for item in first["items"]] == [
+        item["id"] for item in second["items"]
+    ]
     assert {item["kind"] for item in first["items"]} == {
         item["kind"] for item in second["items"]
     }
@@ -452,3 +454,65 @@ async def test_reset_conducteur_rebuilds_ids(
     assert first_ids
     assert payload["action"] == "reset"
     assert first_ids.isdisjoint(second_ids)
+
+
+async def test_as_run_realigns_following_items(
+    dbsession: ormSession,
+    jingles_cart,
+    pubs_cart,
+    beets_integration: BeetsIntegration,
+):
+    """The item going on air takes the real start; later sequential items slide."""
+    from datetime import timedelta
+
+    from radiotomate.scheduler.execution import reconcile_as_run
+
+    now = datetime(2026, 9, 14, 0, 30, tzinfo=PARIS)
+    payload = await ensure_forecast(dbsession, beets_integration, now=now, cursor=0)
+    ids = [item["id"] for item in payload["items"] if item.get("origin") != "desk"]
+    assert len(ids) >= 3
+    first = await RundownItem.from_id(dbsession, ids[0])
+    second = await RundownItem.from_id(dbsession, ids[1])
+    before_first = first.planned_at
+    before_second = second.planned_at
+
+    late = before_first + timedelta(minutes=7)  # antenna is 7 min behind the plan
+    log = MetadataLog(
+        on_air=late,
+        source="autodj",
+        title=first.resource.split(" — ")[-1],
+        artist="",
+        album="",
+        extra={"radiotomate_item_id": first.id},
+    )
+    dbsession.add(log)
+    await reconcile_as_run(dbsession, log)
+    await dbsession.commit()
+
+    first = await RundownItem.from_id(dbsession, ids[0])
+    second = await RundownItem.from_id(dbsession, ids[1])
+    assert first.status == "on_air"
+    assert first.planned_at == late
+    assert second.planned_at == before_second + timedelta(minutes=7)
+
+
+async def test_ensure_forecast_ignores_failed_coverage(
+    dbsession: ormSession,
+    jingles_cart,
+    pubs_cart,
+    beets_integration: BeetsIntegration,
+):
+    """A window full of failed pushes must be re-forecast, not treated as covered."""
+    from sqlalchemy import update
+
+    now = datetime(2026, 9, 14, 0, 30, tzinfo=PARIS)
+    await ensure_forecast(dbsession, beets_integration, now=now, cursor=0)
+    await dbsession.execute(update(RundownItem).values(status="failed"))
+    await dbsession.commit()
+    payload = await ensure_forecast(dbsession, beets_integration, now=now, cursor=0)
+    playable = [i for i in payload["items"] if i.get("status_code") not in {"failed"}]
+    assert playable, payload["items"][:2]
+    fresh = await dbsession.scalar(
+        select(RundownItem).where(RundownItem.status == "planned").limit(1)
+    )
+    assert fresh is not None

@@ -100,6 +100,18 @@ async def test_notifier_posts_webhook_and_vikunja_task():
     assert calls[2].headers["Authorization"] == "Bearer jwt-1"
     assert json.loads(calls[3].content) == {"label_id": 6}
 
+    # Recovery closes the very task that was opened, no second task.
+    calls.clear()
+    await notifier.send(
+        kind="silence", resolved=True, title="[RÉTABLI] silence", body="ok", host="h"
+    )
+    paths = [(c.method, c.url.host, c.url.path) for c in calls]
+    assert paths == [
+        ("POST", "hook.local", "/alert"),
+        ("POST", "vikunja.local", "/api/v1/tasks/42"),
+    ]
+    assert json.loads(calls[1].content)["done"] is True
+
 
 async def test_metrics_snapshot_roundtrip(tmp_path: Path):
     reg = metrics.runtime_metrics

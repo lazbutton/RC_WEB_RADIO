@@ -382,6 +382,14 @@ async def _payload_from_visible(
     }
 
 
+def _coverage_rows(rows: list[RundownItem]) -> list[RundownItem]:
+    """Rows that count as planned antenna. Failed rows stay visible for the
+    console but never as coverage: a burst of unresolvable pushes (files moved
+    by a bank relink) used to leave a window "full" of failures and nothing
+    playable — hence silence."""
+    return [row for row in rows if row.status != RundownStatus.FAILED.value]
+
+
 async def ensure_forecast(
     session: ormSession,
     beets: BeetsIntegration,
@@ -396,7 +404,7 @@ async def ensure_forecast(
 
     now = now_paris(now)
     version = await ensure_programming_version(session)
-    rows = await _visible_items(session, now, horizon_min=horizon_min)
+    rows = _coverage_rows(await _visible_items(session, now, horizon_min=horizon_min))
     target_ahead = max(15, int(horizon_min))
     if rows and forecast_still_covers(
         {"items": [item_to_payload(row) for row in rows]},
@@ -419,7 +427,9 @@ async def ensure_forecast(
             horizon_min=horizon_min,
             cursor=cursor,
         )
-        rows = await _visible_items(session, now, horizon_min=horizon_min)
+        rows = _coverage_rows(
+            await _visible_items(session, now, horizon_min=horizon_min)
+        )
         if rows and forecast_still_covers(
             {"items": [item_to_payload(row) for row in rows]},
             now,
@@ -459,7 +469,9 @@ async def ensure_forecast(
             session,
             version,
             list(forecast.get("items") or []),
-            existing=await _visible_items(session, now, horizon_min=horizon_min),
+            existing=_coverage_rows(
+                await _visible_items(session, now, horizon_min=horizon_min)
+            ),
         )
 
     if commit:
@@ -685,6 +697,61 @@ async def reconcile_as_run(session: ormSession, log: MetadataLog) -> None:
             **dict(item.details or {}),
             "playout_command_id": log.playout_command_id,
         }
+    await realign_rundown(session, item, now)
+
+
+REALIGN_TOLERANCE = timedelta(seconds=5)
+
+
+async def realign_rundown(
+    session: ormSession,
+    item: RundownItem,
+    started: datetime,
+) -> timedelta:
+    """
+    Anchor the rundown on the as-run: the item that just went on air takes the
+    real start time and every later sequential item slides by the same delta.
+    Anchored positions (fixed minute) and desk pins keep their own time.
+    Returns the applied shift (zero when within tolerance).
+    """
+    if item.planned_at is None or item.when_mode == WhenMode.ANCHORED.value:
+        return timedelta(0)
+    if item.origin == DESK_ORIGIN:
+        return timedelta(0)
+    planned = naive_datetime(item.planned_at)
+    started = naive_datetime(started)
+    if planned is None or started is None:
+        return timedelta(0)
+    delta = started - planned
+    if abs(delta) < REALIGN_TOLERANCE:
+        return timedelta(0)
+    following = list(
+        await session.scalars(
+            select(RundownItem).where(
+                RundownItem.id != item.id,
+                RundownItem.status.in_(
+                    list(
+                        REPLACEABLE_STATUSES
+                        | (ENGAGED_STATUSES - {RundownStatus.ON_AIR.value})
+                    )
+                ),
+                RundownItem.when_mode != WhenMode.ANCHORED.value,
+                RundownItem.origin != DESK_ORIGIN,
+                RundownItem.planned_at >= item.planned_at,
+            )
+        )
+    )
+    item.planned_at = started
+    for row in following:
+        if row.planned_at is not None:
+            row.planned_at = naive_datetime(row.planned_at) + delta
+    _log.info(
+        "rundown realigned by %+.0fs on %s (%d following item(s))",
+        delta.total_seconds(),
+        item.id,
+        len(following),
+    )
+    return delta
 
 
 async def _latest_item_for_sound(
