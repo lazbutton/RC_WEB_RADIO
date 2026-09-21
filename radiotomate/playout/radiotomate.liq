@@ -478,6 +478,18 @@ def output_build_alsa(config) =
   output.alsa(radio, device=null.get(config.device, default="default"))
 end
 
+# Icecast outputs state for `/health`: every declared mount is listed in
+# icecast_targets; icecast_connected only holds the ones currently streaming.
+icecast_targets = ref([])
+icecast_connected = ref([])
+
+def icecast_mark(target, up) =
+  without = list.filter(fun (t) -> t != target, icecast_connected())
+  icecast_connected := if up then [target, ...without] else without end
+  state = if up then "connected" else "disconnected" end
+  log.important("icecast #{target} #{state}")
+end
+
 def output_build_icecast(config) =
   if not null.defined(config.encoder) or
     not null.defined(config.quality) or
@@ -494,11 +506,15 @@ def output_build_icecast(config) =
       port = int_of_float(null.get(config.port))
       mount = null.get(config.mount)
       password = null.get(config.password, default="")
+      target = "#{hostname}:#{port}/#{mount}"
+      icecast_targets := [target, ...icecast_targets()]
       output.icecast(
         host=hostname,
         port=port,
         mount=mount,
         password=password,
+        on_connect={icecast_mark(target, true)},
+        on_disconnect={icecast_mark(target, false)},
         null.get(enc),
         radio
       )
@@ -684,6 +700,11 @@ def health_GET(_, res) =
   data.add("source", src)
   data.add("rss_mb", string.float(rss_mb()))
   data.add("cpu_pct", string.float(cpu_pct()))
+  connected = icecast_connected()
+  down = list.filter(fun (t) -> not list.mem(t, connected), icecast_targets())
+  data.add("icecast_targets", string.concat(separator=",", icecast_targets()))
+  data.add("icecast_connected", string.concat(separator=",", connected))
+  data.add("icecast_down", string.concat(separator=",", down))
   if src == "stream" then
     buf = finite_seconds(stream.remaining())
     if buf > 0. then

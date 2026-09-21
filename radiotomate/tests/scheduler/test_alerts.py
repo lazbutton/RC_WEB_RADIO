@@ -165,3 +165,24 @@ def test_ef01_playout_down_does_not_double_report():
     assert (
         alerts.live_slot_without_encoder([slot], None, _paris(2, 20, 10), 90.0) is None
     )
+
+
+async def test_icecast_output_down_opens_and_resolves():
+    spy = _Spy()
+    monitor = alerts.AlertMonitor(_settings(), spy)
+    ok = {
+        "silence_s": "0.0",
+        "source": "autodj",
+        "icecast_targets": "icecast:8000/button.mp3,radio.example:8000/button.mp3",
+        "icecast_connected": "icecast:8000/button.mp3,radio.example:8000/button.mp3",
+        "icecast_down": "",
+    }
+    assert await monitor.step(ok, 1.0) == []
+    lost = dict(
+        ok,
+        icecast_connected="icecast:8000/button.mp3",
+        icecast_down="radio.example:8000/button.mp3",
+    )
+    assert await monitor.step(lost, 1.0) == ["open:icecast_down"]
+    assert "radio.example:8000/button.mp3" in spy.sent[0]["body"]
+    assert await monitor.step(ok, 1.0) == ["resolved:icecast_down"]

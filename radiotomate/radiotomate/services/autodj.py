@@ -55,9 +55,7 @@ def position_payload(position: ClockPosition) -> dict:
     }
     if position.when_mode == WhenMode.ANCHORED.value:
         payload["minute"] = position.minute
-        payload["sync"] = (
-            position.sync_enum.value if position.sync_enum else None
-        )
+        payload["sync"] = position.sync_enum.value if position.sync_enum else None
     return payload
 
 
@@ -257,15 +255,23 @@ async def apply_clock(
             for row in rows:
                 pos_id = _position_id(row)
                 current = by_id.get(pos_id) if pos_id is not None else None
-                if current is not None and current.id in claimed:
+                if current is not None and (
+                    current.id in claimed or current in kept_rows
+                ):
                     current = None
                 if current is None:
+                    # Reuse only positions that existed before this call:
+                    # an autoflush (cart/category lookups) can give a freshly
+                    # appended row an id, and it must not be recycled by the
+                    # next motif entry (which used to eat every second row).
                     current = next(
                         (
                             pos
                             for pos in clock.positions
                             if pos.id is not None
+                            and pos.id in by_id
                             and pos.id not in claimed
+                            and pos not in kept_rows
                             and pos.when_mode == when_mode
                         ),
                         None,
@@ -354,11 +360,15 @@ async def save_slot(  # noqa: PLR0913
             "A slot is already scheduled at that time.",
             field="minute",
         )
-    if clock_id is not None and await Clock.from_id(
-        session,
-        clock_id,
-        load_positions=False,
-    ) is None:
+    if (
+        clock_id is not None
+        and await Clock.from_id(
+            session,
+            clock_id,
+            load_positions=False,
+        )
+        is None
+    ):
         raise DomainValidationError("unknown clock_id", field="clock_id")
     return slot
 

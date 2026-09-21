@@ -1,4 +1,5 @@
-"""Antenna alerts: silence, playout unreachable, heartbeat lost, live slot empty.
+"""Antenna alerts: silence, playout unreachable, heartbeat lost, live slot empty,
+Icecast output (local or public relay) disconnected.
 
 Runs inside the scheduler process, polls Liquidsoap ``/health`` and the runtime
 metrics, and notifies once per incident (plus a recovery note) through:
@@ -202,6 +203,11 @@ class AlertMonitor:
             source = str(health.get("source") or "?")
             if silence >= self.settings.silence_seconds:
                 active["silence"] = f"{silence:.0f} s de silence (source {source})"
+            down = [t for t in str(health.get("icecast_down") or "").split(",") if t]
+            if down:
+                active["icecast_down"] = "Sortie Icecast déconnectée : " + ", ".join(
+                    sorted(down)
+                )
         if heartbeat_age is None or heartbeat_age > self.settings.heartbeat_max_age:
             age = "jamais" if heartbeat_age is None else f"{heartbeat_age:.0f} s"
             active["heartbeat"] = f"Dernier battement Liquidsoap : {age}"

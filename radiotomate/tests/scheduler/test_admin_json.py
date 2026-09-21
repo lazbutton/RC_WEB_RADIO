@@ -34,9 +34,7 @@ async def _admin_client(  # noqa: PLR0913
 ):
     user = User(username=username)
     user.update_password(users_password)
-    user.update_permissions_map(
-        {"admin": True} if permissions is None else permissions
-    )
+    user.update_permissions_map({"admin": True} if permissions is None else permissions)
     dbsession.add(user)
     await dbsession.commit()
     client = _interface_client(app_configration, beets_integration)
@@ -170,6 +168,51 @@ async def test_clock_json_roundtrip(  # noqa: PLR0913
     assert deleted.status_code == 200
 
 
+async def test_clock_put_keeps_every_new_motif_row(  # noqa: PLR0913
+    raw_app,
+    app_configration: dict,
+    beets_integration: BeetsIntegration,
+    dbsession: ormSession,
+    users_password: str,
+    jingles_cart,
+):
+    """Regression: rows without id appended in one PUT were eaten pairwise
+    (autoflush gave the fresh row an id, the next row recycled it)."""
+    client = await _admin_client(
+        app_configration,
+        beets_integration,
+        dbsession,
+        users_password,
+        "clock-motif-admin",
+    )
+    created = await client.post(
+        "/autodj/clocks.json",
+        json={
+            "name": "Rotation habillée",
+            "fallback_cart": "Jingles",
+            "motif": [{"kind": "jingle", "cart": "Jingles"}],
+            "anchors": [],
+        },
+    )
+    assert created.status_code == 201, await created.get_data(as_text=True)
+    clock = (await created.get_json())["clock"]
+    music = {"kind": "musique", "category": "Rotation"}
+    updated = await client.put(
+        f"/autodj/clocks/{clock['id']}.json",
+        json={
+            "version": clock["version"],
+            "name": clock["name"],
+            "fallback_cart": "Jingles",
+            "motif": [music, music, music, {"kind": "jingle", "cart": "Jingles"}],
+            "anchors": [],
+        },
+    )
+    assert updated.status_code == 200, await updated.get_data(as_text=True)
+    motif = (await updated.get_json())["clock"]["motif"]
+    assert [row["kind"] for row in motif] == ["musique", "musique", "musique", "jingle"]
+    assert len({row["id"] for row in motif}) == 4
+
+
 async def test_clock_put_appends_while_rundown_references_position(  # noqa: PLR0913
     raw_app,
     app_configration: dict,
@@ -204,9 +247,7 @@ async def test_clock_put_appends_while_rundown_references_position(  # noqa: PLR
     assert created.status_code == 201, await created.get_data(as_text=True)
     clock = (await created.get_json())["clock"]
     position_id = clock["motif"][0]["id"]
-    dbsession.add(
-        ProgrammingVersion(id="pv-clock-fk", source="test", description="fk")
-    )
+    dbsession.add(ProgrammingVersion(id="pv-clock-fk", source="test", description="fk"))
     await dbsession.flush()
     dbsession.add(
         RundownItem(
@@ -951,7 +992,10 @@ async def test_cart_sounds_delta_json(
     assert [row["title"] for row in second_body["cart"]["sounds"]] == ["two.mp3"]
     listed = await (await client.get("/carts.json")).get_json()
     cart = next(row for row in listed["carts"] if row["id"] == cart_id)
-    assert [row["title"] for row in cart["sounds"]] == ["ohradiotomateoh.mp3", "two.mp3"]
+    assert [row["title"] for row in cart["sounds"]] == [
+        "ohradiotomateoh.mp3",
+        "two.mp3",
+    ]
 
 
 async def test_cart_attach_bank_path_json(  # noqa: PLR0913
