@@ -586,8 +586,8 @@ class SchedulerDemo(Scheduler):
                 {
                     "on_air": str(row.get("at") or ""),
                     "source": str(row.get("queue") or "autodj"),
-                    "artist": str(row.get("artist") or ""),
-                    "title": str(row.get("title") or ""),
+                    "artist": str(row.get("artist") or row.get("cart") or ""),
+                    "title": str(row.get("title") or row.get("resource") or ""),
                     "path": row.get("path"),
                     "rundown_item_id": row.get("id"),
                 }

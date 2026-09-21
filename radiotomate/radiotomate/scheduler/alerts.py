@@ -36,10 +36,12 @@ net is the clock, by construction, never silence.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import socket
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from time import time
 
 import httpx
@@ -168,13 +170,74 @@ def live_slot_without_encoder(
 class AlertMonitor:
     """Evaluate the antenna state and keep one open incident per kind."""
 
-    def __init__(self, settings: AlertSettings, notifier: Notifier | None = None):
+    def __init__(
+        self,
+        settings: AlertSettings,
+        notifier: Notifier | None = None,
+        state_path: Path | None = None,
+    ):
         self.settings = settings
         self.notifier = notifier
         self.open: dict[str, Incident] = {}
         self.playout_failures = 0
         self.host = socket.gethostname()
         self.live_slots: list[LiveSlot] = []
+        # Open incidents (and their Vikunja tasks) survive a scheduler restart
+        # so the recovery closes the right task instead of leaving it open.
+        self.state_path = state_path
+
+    def load_state(self) -> None:
+        if self.state_path is None or not self.state_path.exists():
+            return
+        try:
+            data = json.loads(self.state_path.read_text())
+        except (OSError, ValueError):
+            _log.warning("alerts: unreadable state %s", self.state_path)
+            return
+        for kind, raw in (data.get("open") or {}).items():
+            try:
+                self.open[kind] = Incident(
+                    kind=kind,
+                    detail=str(raw.get("detail") or ""),
+                    opened_at=float(raw.get("opened_at") or time()),
+                    notified_at=(
+                        float(raw["notified_at"])
+                        if raw.get("notified_at") is not None
+                        else None
+                    ),
+                )
+            except (TypeError, ValueError, AttributeError):
+                continue
+        if self.notifier is not None:
+            for kind, task_id in (data.get("vikunja_open") or {}).items():
+                try:
+                    self.notifier._vikunja_open[kind] = int(task_id)
+                except (TypeError, ValueError):
+                    continue
+        if self.open:
+            _log.info("alerts: %d incident(s) restored from disk", len(self.open))
+
+    def save_state(self) -> None:
+        if self.state_path is None:
+            return
+        payload = {
+            "open": {
+                kind: {
+                    "detail": inc.detail,
+                    "opened_at": inc.opened_at,
+                    "notified_at": inc.notified_at,
+                }
+                for kind, inc in self.open.items()
+            },
+            "vikunja_open": dict(self.notifier._vikunja_open) if self.notifier else {},
+        }
+        try:
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.state_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload))
+            tmp.replace(self.state_path)
+        except OSError:
+            _log.warning("alerts: cannot write state %s", self.state_path)
 
     # -- evaluation ------------------------------------------------------------
 
@@ -245,6 +308,8 @@ class AlertMonitor:
             if incident.notified_at is not None:
                 await self._notify(incident, resolved=True)
                 emitted.append(f"resolved:{kind}")
+        if emitted:
+            self.save_state()
         return emitted
 
     async def _notify(self, incident: Incident, *, resolved: bool) -> None:
@@ -426,7 +491,9 @@ async def loop(app) -> None:
     if not settings.enabled:
         return
     notifier = Notifier(settings) if settings.has_target else None
-    monitor = AlertMonitor(settings, notifier)
+    state_path = Path(app.config["DATA_ROOT"]) / "alerts.json"
+    monitor = AlertMonitor(settings, notifier, state_path=state_path)
+    monitor.load_state()
     app.extensions["alert_monitor"] = monitor
     _log.info(
         "alerts on: silence>=%.0fs heartbeat>%.0fs targets=%s",

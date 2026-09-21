@@ -198,3 +198,58 @@ async def test_icecast_output_down_opens_and_resolves():
     assert await monitor.step(lost, 1.0) == ["open:icecast_down"]
     assert "radio.example:8000/button.mp3" in spy.sent[0]["body"]
     assert await monitor.step(ok, 1.0) == ["resolved:icecast_down"]
+
+
+async def test_incidents_survive_restart(tmp_path: Path):
+    """An incident opened before a restart is resolved (and its task closed) after."""
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "jwt"})
+        if request.url.path.endswith("/tasks") and request.method == "PUT":
+            return httpx.Response(201, json={"id": 77})
+        return httpx.Response(200, json={})
+
+    settings = _settings(
+        vikunja={
+            "url": "http://vikunja.local",
+            "project_id": 3,
+            "username": "b",
+            "password": "p",
+        }
+    )
+    state = tmp_path / "alerts.json"
+    first = alerts.AlertMonitor(
+        settings,
+        alerts.Notifier(
+            settings, httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        ),
+        state_path=state,
+    )
+    assert await first.step({"silence_s": "30", "source": "autodj"}, 1.0) == [
+        "open:silence"
+    ]
+    assert state.exists()
+
+    # "restart": a fresh monitor + notifier reload the disk state
+    second = alerts.AlertMonitor(
+        settings,
+        alerts.Notifier(
+            settings, httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        ),
+        state_path=state,
+    )
+    second.load_state()
+    assert "silence" in second.open
+    calls.clear()
+    assert await second.step({"silence_s": "0", "source": "autodj"}, 1.0) == [
+        "resolved:silence"
+    ]
+    closing = [
+        c for c in calls if c.method == "POST" and c.url.path == "/api/v1/tasks/77"
+    ]
+    assert len(closing) == 1
+    assert json.loads(closing[0].content)["done"] is True
+    assert json.loads(state.read_text())["open"] == {}
