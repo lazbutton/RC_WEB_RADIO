@@ -1,9 +1,7 @@
 from asyncio import sleep
-from datetime import datetime
 from unittest.mock import patch
 
 import httpx
-import pytest
 from quart.testing import QuartClient
 from sqlalchemy.orm import Session as ormSession
 
@@ -11,29 +9,6 @@ from radiotomate.enums import CartMode, ScheduleMode
 from radiotomate.interface.carts import apply_schedule
 from radiotomate.models import Cart, Sound
 from radiotomate.models.cart import URL_TO_AUTODJ_QUEUE
-from tests.scheduler import schedule_in_two_seconds
-
-
-async def test_to_timed_trigger():
-    cart = Cart(schedule_day_of_week="8")
-    with pytest.raises(IndexError):
-        _ = cart.to_timed_trigger()
-
-    cart = Cart(schedule_week="60")
-    with pytest.raises(ValueError):  # noqa: PT011 this ValueError comes from APS
-        _ = cart.to_timed_trigger()
-
-    trigger = Cart(
-        schedule_day_of_week="1",
-        schedule_hour="12",
-        schedule_minute="30",
-    ).to_timed_trigger()
-    next_time = trigger.next()
-    assert next_time.year == datetime.now().year
-    assert next_time.weekday() == 0  # monday is 0 for datetime, but 1 for APScheduler
-    assert next_time.hour == 12
-    assert next_time.minute == 30
-    assert next_time.second == 0
 
 
 def test_schedule_summary():
@@ -229,59 +204,20 @@ async def test_schedule(
         result = await client.get(f"/schedule/{fake_cart.id}", headers=auth)
         assert result.status_code == 404
 
-    year = datetime.now().year + 1
-    fake_cart.schedule_mode = ScheduleMode.TIMED
-    fake_cart.schedule_year = str(year)
-    fake_cart.schedule_month = "3"
-    fake_cart.schedule_day = "1"
-    fake_cart.schedule_hour = "12"
-    fake_cart.schedule_minute = "30"
-    await dbsession.commit()
-
     result = await client.put("/schedule/123456789", headers=auth)
-    result_text = (await result.data).decode()
-    assert result.status_code == 404, "got non-404 response:" + result_text
+    assert result.status_code == 404
     result = await client.put("/schedule/lol", headers=auth)
-    result_text = (await result.data).decode()
-    assert result.status_code == 404, "got non-404 response:" + result_text
+    assert result.status_code == 404
 
-    result = await client.put(f"/schedule/{fake_cart.id}", headers=auth)
-    result_text = (await result.data).decode()
-    assert result.status_code == 200, "got non-OK response:" + result_text
-
-    result = await client.get(f"/schedule/{fake_cart.id}", headers=auth)
-    result_text = (await result.data).decode()
-    assert result.status_code == 200, "got non-OK response:" + result_text
-    result_json = await result.json
-    next_time = datetime.fromisoformat(result_json["next_time"])
-    assert next_time.year == year
-    assert next_time.month == 3
-    assert next_time.day == 1
-    assert next_time.hour == 12
-    assert next_time.minute == 30
-    assert next_time.second == 0
-
-    schedule_in_two_seconds(fake_cart)
+    # Retired cron mode: the PUT is still accepted, nothing is armed.
+    fake_cart.schedule_mode = ScheduleMode.TIMED
     await dbsession.commit()
-
-    with patch(
-        "httpx.AsyncClient.post",
-        return_value=httpx.Response(200, json={"OK": 1}),
-    ) as mock_client:
-        result = await client.put(f"/schedule/{fake_cart.id}", headers=auth)
-        result_text = (await result.data).decode()
-        assert result.status_code == 200, "got non-OK response:" + result_text
-        await sleep(3.0)  # we have to wait for the scheduler to trigger
-        mock_client.assert_called_once_with(
-            "/queue/carts",
-            json={
-                "path": str(fake_sound.path),
-                "artist": fake_cart.title,
-                "title": fake_sound.title,
-                "radiotomate_sound_id": fake_sound.id,
-                "rg_track_gain": str(fake_sound.gain),
-            },
-        )
+    result = await client.put(f"/schedule/{fake_cart.id}", headers=auth)
+    assert result.status_code == 200
+    result = await client.get(f"/schedule/{fake_cart.id}", headers=auth)
+    assert result.status_code == 404
+    result = await client.get("/schedule/lol", headers=auth)
+    assert result.status_code == 404
 
 
 async def test_push_now(
@@ -379,8 +315,6 @@ async def test_schedule_no_sound_enabled(
     fake_sound: Sound,
     auth: dict,
 ):
-    fake_cart.schedule_mode = ScheduleMode.TIMED
-    schedule_in_two_seconds(fake_cart)
     fake_sound.active = False
     await dbsession.commit()
 
@@ -388,10 +322,8 @@ async def test_schedule_no_sound_enabled(
         "httpx.AsyncClient.post",
         return_value=httpx.Response(200, json={"OK": 1}),
     ) as mock_client:
-        result = await client.put(f"/schedule/{fake_cart.id}", headers=auth)
-        result_text = (await result.data).decode()
-        assert result.status_code == 200, "got non-OK response:" + result_text
-        await sleep(3.0)  # we have to wait for the scheduler to trigger
+        result = await client.post(f"/schedule/{fake_cart.id}/now", headers=auth)
+        assert result.status_code == 200, (await result.data).decode()
         mock_client.assert_not_called()
 
 
@@ -402,8 +334,6 @@ async def test_schedule_no_sound_analyzed(
     fake_sound: Sound,
     auth: dict,
 ):
-    fake_cart.schedule_mode = ScheduleMode.TIMED
-    schedule_in_two_seconds(fake_cart)
     fake_sound.gain = None
     await dbsession.commit()
 
@@ -411,10 +341,8 @@ async def test_schedule_no_sound_analyzed(
         "httpx.AsyncClient.post",
         return_value=httpx.Response(200, json={"OK": 1}),
     ) as mock_client:
-        result = await client.put(f"/schedule/{fake_cart.id}", headers=auth)
-        result_text = (await result.data).decode()
-        assert result.status_code == 200, "got non-OK response:" + result_text
-        await sleep(3.0)  # we have to wait for the scheduler to trigger
+        result = await client.post(f"/schedule/{fake_cart.id}/now", headers=auth)
+        assert result.status_code == 200, (await result.data).decode()
         mock_client.assert_not_called()
 
 
@@ -426,11 +354,10 @@ async def test_sound_max_duration(
     auth: dict,
 ):
     """
-    Checks that a sounds cart configured with a max_duration does query playout to skip
-    each pushed sound.
+    A sounds cart with a max_duration asks the playout to skip the pushed sound
+    once the time is over (in-process timer, no APScheduler).
     """
     fake_cart.max_duration = 1
-    schedule_in_two_seconds(fake_cart)
     await dbsession.commit()
 
     with (
@@ -443,18 +370,22 @@ async def test_sound_max_duration(
             return_value=httpx.Response(200, json={"OK": 1}),
         ),
     ):
-        result = await client.put(f"/schedule/{fake_cart.id}", headers=auth)
-        result_text = (await result.data).decode()
-        assert result.status_code == 200, "got non-OK response:" + result_text
+        result = await client.post(f"/schedule/{fake_cart.id}/now", headers=auth)
+        assert result.status_code == 200, (await result.data).decode()
+        armed = await client.get(f"/schedule/{fake_cart.id}", headers=auth)
+        assert armed.status_code == 200
+        assert "next_time" in await armed.json
 
-        await sleep(4.0)  # we have to wait for the scheduler to trigger + skip
-        # pushing to carts' queue is checked by another test, so we only check .delete()
+        await sleep(1.5)  # the timer fires after max_duration
         mock_client_delete.assert_called_once_with(
             "/live",
             params={
                 "radiotomate_sound_id": fake_sound.id,
             },
         )
+    assert (
+        await client.get(f"/schedule/{fake_cart.id}", headers=auth)
+    ).status_code == 404
 
 
 async def test_relay(
@@ -464,12 +395,11 @@ async def test_relay(
     auth: dict,
 ):
     """
-    Checks that a relay cart does trigger POST and DELETE on /relay at desired times
+    A relay cart POSTs /relay when pushed and DELETEs /live after max_duration.
     """
     fake_cart.mode = CartMode.RELAY
     fake_cart.url = "https://radiotomate.trying.to.test.a.stream.lol/something.flac"
     fake_cart.max_duration = 1
-    schedule_in_two_seconds(fake_cart)
     await dbsession.commit()
 
     with (
@@ -482,11 +412,10 @@ async def test_relay(
             return_value=httpx.Response(200, json={"OK": 1}),
         ) as mock_client_post,
     ):
-        result = await client.put(f"/schedule/{fake_cart.id}", headers=auth)
-        result_text = (await result.data).decode()
-        assert result.status_code == 200, "got non-OK response:" + result_text
+        result = await client.post(f"/schedule/{fake_cart.id}/now", headers=auth)
+        assert result.status_code == 200, (await result.data).decode()
 
-        await sleep(4.0)  # we have to wait for the scheduler to trigger + skip
+        await sleep(1.5)
         mock_client_post.assert_called_once_with(
             "/relay",
             params={
@@ -508,7 +437,6 @@ async def test_schedule_to_autodj(
     fake_sound: Sound,
     auth: dict,
 ):
-    schedule_in_two_seconds(fake_cart)
     fake_cart.url = URL_TO_AUTODJ_QUEUE
     await dbsession.commit()
 
@@ -516,10 +444,8 @@ async def test_schedule_to_autodj(
         "httpx.AsyncClient.post",
         return_value=httpx.Response(200, json={"OK": 1}),
     ) as mock_client:
-        result = await client.put(f"/schedule/{fake_cart.id}", headers=auth)
-        result_text = (await result.data).decode()
-        assert result.status_code == 200, "got non-OK response:" + result_text
-        await sleep(3.0)  # we have to wait for the scheduler to trigger
+        result = await client.post(f"/schedule/{fake_cart.id}/now", headers=auth)
+        assert result.status_code == 200, (await result.data).decode()
         mock_client.assert_called_once_with(
             "/queue/autodj",
             json={

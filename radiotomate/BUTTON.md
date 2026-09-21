@@ -25,7 +25,7 @@ Scheduler (`radiotomate/scheduler/`) :
 - `metrics.py` : `/metrics` persisté dans `data/metrics.json`, une ligne / heure dans `data/exports/metrics.jsonl`. Config `metrics:`.
 - `alerts.py` : silence, playout injoignable, heartbeat, créneau live sans encodeur (EF-01, `live_absent`) → log, webhook, tâche Vikunja. Config `alerts:`.
 - ReplayGain : un titre Beets sans `rg_track_gain` est analysé à la prévision (`analyze_item_soon`) puis au besoin au push (`ensure_item_gain`) ; plus de push sans gain.
-- Carts : mode `CLOCK` (défaut) = joué par les horloges et les pads, sans cron APScheduler ; migration v13 bascule les crons par défaut `* :00`.
+- Carts : mode `CLOCK` (défaut) = joué par les horloges et les pads. APScheduler retiré (v14 : `TIMED` → `CLOCK`, tables `apscheduler_*` supprimées) ; `max_duration` = minuterie in-process `scheduler/timers.py` (`GET /schedule/<id>` donne la prochaine coupure).
 
 Liquidsoap (`playout/radiotomate.liq`, LS 2.4.5) : `radiotomate_queue` annoté sur chaque push (source as-run fiable), `/queue/flush` à corps optionnel `{"queues": […]}`, `relay_url` configurable. Vérifier : `RTCONFIG=… liquidsoap --check playout/radiotomate.liq` (fait en CI).
 

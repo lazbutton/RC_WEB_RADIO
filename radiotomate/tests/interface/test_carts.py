@@ -89,7 +89,9 @@ class TestCarts:
         await expect(carts_page.dialog).to_contain_text("already exists")
         await carts_page.dialog_click("OK")
         await carts_page.form_input("Titre").fill(testing_cart2_title)
-        await carts_page.form.get_by_label("Programmation").select_option(label="Jingles")
+        await carts_page.form.get_by_label("Programmation").select_option(
+            label="Jingles"
+        )
         await carts_page.form_button("Ajouter").click()
         await expect(carts_page.table).to_contain_text(testing_cart2_title)
         await expect(carts_page.line_of(testing_cart2_title)).to_contain_text(
@@ -118,16 +120,16 @@ class TestCarts:
         await carts_page.form.get_by_role("combobox", name="mode").select_option(
             label="Random",
         )
-        await carts_page.form.get_by_label("Programmation").select_option(label="Timed")
-        await carts_page.form.get_by_label("heure").select_option(label="12")
-        await carts_page.form.get_by_label("minute").select_option(label="30")
+        await carts_page.form.get_by_label("Programmation").select_option(
+            label="Horloge"
+        )
         await carts_page.form_button("Enregistrer").click()
         await expect(carts_page.form_button("Annuler")).not_to_be_visible()
         await expect(carts_page.table).to_contain_text("Edited notes")
         await expect(carts_page.line_of(testing_cart_title2)).not_to_contain_text(
             "limit"
         )
-        await expect(carts_page.line_of(testing_cart_title2)).to_contain_text("12:30")
+        await expect(carts_page.line_of(testing_cart_title2)).to_contain_text("Horloge")
         await expect(carts_page.line_of(testing_cart_title2)).not_to_contain_text(
             "error",
         )
@@ -172,55 +174,26 @@ class TestCarts:
 
         await carts_page.form_input("Titre").fill("Testing cart modes")
 
-        await carts_page.form.get_by_label("Programmation").select_option(label="Jingles")
+        await carts_page.form.get_by_label("Programmation").select_option(
+            label="Jingles"
+        )
         await expect(
             carts_page.form.get_by_text("Quand", exact=True)
         ).not_to_be_visible()
-        await carts_page.form.get_by_label("Programmation").select_option(label="Timed")
-        await expect(carts_page.form.get_by_text("Quand", exact=True)).to_be_visible()
-
+        # The cron "Timed" mode is retired: only Horloge / Jingles are offered.
         await expect(
-            carts_page.form.get_by_placeholder("second", exact=True)
-        ).not_to_be_visible()
-        await carts_page.form.get_by_label("Avancé").check()
-        await expect(
-            carts_page.form.get_by_placeholder("second", exact=True)
-        ).to_be_visible()
-        await carts_page.form.get_by_placeholder("hour").fill("12")
-        await carts_page.form.get_by_placeholder("minute", exact=True).fill("29")
-        await carts_page.form.get_by_placeholder("second", exact=True).fill("59")
+            carts_page.form.get_by_label("Programmation").get_by_role(
+                "option", name="Timed"
+            )
+        ).to_have_count(0)
         await carts_page.form.get_by_label("Auto-DJ").click()
         await carts_page.form_button("Ajouter").click()
 
         await carts_page.line_of("Testing cart modes").get_by_title("Modifier").click()
-        await expect(carts_page.form.get_by_label("Avancé")).to_be_checked()
         await expect(carts_page.form.get_by_label("Auto-DJ")).to_be_checked()
-
-        await carts_page.form.get_by_label("Avancé").uncheck()
-        await expect(
-            carts_page.form.get_by_placeholder("second", exact=True)
-        ).not_to_be_visible()
-        await expect(carts_page.form.get_by_label("Auto-DJ")).not_to_be_visible()
-
-        await carts_page.form.get_by_label("jour de la semaine").select_option(label="Vendredi")
-        await carts_page.form.get_by_label("heure").select_option(label="6")
-        await carts_page.form.get_by_label("minute").select_option(label="1")
-        await carts_page.form_button("Enregistrer").click()
-
-        await carts_page.line_of("Testing cart modes").get_by_title("Modifier").click()
-        await expect(carts_page.form.get_by_label("Avancé")).not_to_be_checked()
-        await expect(carts_page.form.get_by_label("jour de la semaine")).to_have_value("4")
-        await expect(carts_page.form.get_by_label("heure")).to_have_value("6")
-        await expect(carts_page.form.get_by_label("minute")).to_have_value("1")
-
-        await carts_page.form.get_by_label("Avancé").check()
-        await expect(
-            carts_page.form.get_by_placeholder("second", exact=True)
-        ).to_be_visible()
-        await expect(
-            carts_page.form.get_by_placeholder("second", exact=True)
-        ).to_have_value("0")
-        await expect(carts_page.form.get_by_label("Carts")).to_be_checked()
+        await expect(carts_page.line_of("Testing cart modes")).to_contain_text(
+            "Jingles"
+        )
 
     async def test_carts_sounds(self, admin_page: Page, luser_page: Page):  # noqa: PLR0915
         """
@@ -272,7 +245,9 @@ class TestCarts:
             other_user_page.get_by_role("link", name="Nouveau cart")
         ).not_to_be_visible()
         await (
-            other_user_page.line_of("Sounds test").get_by_title("Gérer les sons").click()
+            other_user_page.line_of("Sounds test")
+            .get_by_title("Gérer les sons")
+            .click()
         )
         await expect(other_user_page.line_of("GTA3Theme")).to_be_visible()
         line = other_user_page.line_of("Winamp")

@@ -1,15 +1,14 @@
 """
-Scheduling-related endpoints and tasks.
+Push endpoints for carts (« diffuser maintenant », pads, banque) and the
+``max_duration`` timers.
 
-Note that in this module Cart.id is usually a string, because it is also used as a
-Schedule ID and APScheduler prefers strings.
+Recurring carts are scheduled by the clock (dayparts, anchors), never here:
+``PUT /schedule/<id>`` only keeps the legacy contract (200, no job).
 """
 
 import logging
 from datetime import datetime, timedelta
 
-from apscheduler import CoalescePolicy, ScheduleLookupError
-from apscheduler.triggers.date import DateTrigger
 from quart import Blueprint, current_app, g, request
 from sqlalchemy.orm import Session as ormSession
 from werkzeug.exceptions import BadRequest
@@ -158,16 +157,7 @@ async def _enqueue_sound(
 
             note_carts_push(cart.id)
         if cart.max_duration:
-            await current_app.scheduler.remove_schedule(str(-cart.id))
-            when = datetime.now() + timedelta(seconds=cart.max_duration)
-            await current_app.scheduler.add_schedule(
-                skip_cart,
-                DateTrigger(when),
-                id=str(-cart.id),
-                args=[int(sound.id)],
-                coalesce=CoalescePolicy.latest,
-                misfire_grace_time=10.0,
-            )
+            arm_max_duration(current_app, cart, sound_id=int(sound.id))
     else:
         _log.error(
             "Error while pushing cart %d sound %s:%s: %s",
@@ -176,6 +166,23 @@ async def _enqueue_sound(
             sound.path,
             result.error,
         )
+
+
+def _timer_key(cart: Cart) -> str:
+    return f"max_duration:{cart.id}"
+
+
+def arm_max_duration(app, cart: Cart, *, sound_id: int | None = None) -> datetime:
+    """Ask the playout to skip the cart sound / relay once ``max_duration`` is over."""
+    when = datetime.now() + timedelta(seconds=float(cart.max_duration))
+
+    async def _skip() -> None:
+        db = app.extensions["sqlalchemy"]
+        async with db.session() as session:
+            await skip_cart(session, app, sound_id)
+
+    app.timers.schedule(_timer_key(cart), when, _skip)
+    return when
 
 
 async def _push_cart_relay(cart: Cart, gateway: PlayoutGateway, current_app):
@@ -188,16 +195,7 @@ async def _push_cart_relay(cart: Cart, gateway: PlayoutGateway, current_app):
             result.payload,
         )
         if cart.max_duration:
-            # remove a potential previous entry
-            await current_app.scheduler.remove_schedule(str(-cart.id))
-            when = datetime.now() + timedelta(seconds=cart.max_duration)
-            await current_app.scheduler.add_schedule(
-                skip_cart,
-                DateTrigger(when),
-                id=str(-cart.id),
-                coalesce=CoalescePolicy.latest,
-                misfire_grace_time=10.0,
-            )
+            arm_max_duration(current_app, cart)
         else:
             _log.warning(
                 "relay cart %d has no maximum duration! might play forever.", cart.id
@@ -209,56 +207,36 @@ async def _push_cart_relay(cart: Cart, gateway: PlayoutGateway, current_app):
 @blueprint.put("/schedule/<cart_id>")
 @token_required
 async def post_schedule(cart_id: str):
+    """
+    Legacy hook called by the interface after a cart edit. Recurring carts are
+    the clock's job now (dayparts, anchors, pads): nothing to arm here, the
+    schedule is always "correct".
+    """
     try:
         cart = await Cart.from_id(g.dbsession, int(cart_id))
     except ValueError:
         return f"cart #{cart_id} not found", 404
     if not cart:
         return f"cart #{cart_id} not found", 404
-
-    await current_app.scheduler.remove_schedule(cart_id)
-
-    if not cart.schedule_mode.uses_cron:
-        # Clock / jingles carts have no cron: the PUT only drops a stale job
-        # (e.g. a cart that just left TIMED mode).
-        cart.schedule_correct = True
-        _log.info(
-            "Cart #%s is %s: no APScheduler job", cart_id, cart.schedule_mode.value
-        )
-        return "", 200
-
-    try:
-        trigger = cart.to_timed_trigger()
-    except ValueError:
-        message = f"Invalid cron expression for cart #{cart_id}: {cart.schedule_repr}"
-        _log.error(message)
-        cart.schedule_correct = False
-        await g.dbsession.commit()
-        raise BadRequest(message) from None
-
-    await current_app.scheduler.add_schedule(
-        push_cart,
-        trigger,
-        id=cart_id,
-        args=[int(cart_id)],
-        coalesce=CoalescePolicy.latest,
-        misfire_grace_time=10.0,
-    )
-
     cart.schedule_correct = True
+    _log.debug("Cart #%s is %s: clock-driven", cart_id, cart.schedule_mode.value)
     return "", 200
 
 
 @blueprint.get("/schedule/<cart_id>")
 @token_required
 async def get_schedule(cart_id: str):
+    """Next pending ``max_duration`` skip for this cart, if any."""
     try:
-        schedule = await current_app.scheduler.get_schedule(cart_id)
-        return {
-            "next_time": schedule.next_fire_time.isoformat(),
-        }
-    except ScheduleLookupError:
+        cart = await Cart.from_id(g.dbsession, int(cart_id))
+    except ValueError:
+        cart = None
+    if cart is None:
+        return f"cart #{cart_id} not found", 404
+    when = current_app.timers.next_fire(_timer_key(cart))
+    if when is None:
         return f"cart #{cart_id} not scheduled", 404
+    return {"next_time": when.isoformat()}
 
 
 @blueprint.post("/schedule/<cart_id>/now")

@@ -27,7 +27,6 @@ multipart = "^1.1.0"
 mutagen = "^1.47.0"
 ruamel-yaml = "^0.18.6"
 httpx = "^0.28.1"
-apscheduler = {version="4.0.0a6", allow-prereleases = true, extras=["sqlalchemy"]}
 beets = "~2.5.1"
 drop2beets = "^2.0.1"
 

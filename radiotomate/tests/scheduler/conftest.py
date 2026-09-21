@@ -139,7 +139,7 @@ async def pubs_cart(raw_app: CustomQuart, dbsession: ormSession) -> Cart:
         title="Pubs",
         path=cartpath,
         mode=CartMode.RANDOM,
-        schedule_mode=ScheduleMode.TIMED,
+        schedule_mode=ScheduleMode.CLOCK,
     )
     dbsession.add(cart)
     await dbsession.flush()
@@ -166,7 +166,7 @@ async def fake_cart(
         title="Testing Radiotomate",
         path=cartpath,
         mode=CartMode.PLAYLIST,
-        schedule_mode=ScheduleMode.TIMED,
+        schedule_mode=ScheduleMode.CLOCK,
     )
     dbsession.add(cart)
     await dbsession.commit()

@@ -6,7 +6,6 @@ from pathlib import Path  # noqa: TC003
 from random import choice
 from typing import ClassVar
 
-from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import Boolean, Integer, Select, String, case, delete, func, select
 from sqlalchemy.dialects.sqlite import DATETIME
 from sqlalchemy.orm import (
@@ -233,7 +232,7 @@ class Cart(Base):
             except (ValueError, IndexError):
                 base = self._schedule_cron_short()
         else:
-            base = self._next_fire_display() or self._schedule_cron_short()
+            base = self._schedule_cron_short()
         if not self.schedule_correct:
             return f"{base} · erreur"
         return base
@@ -243,15 +242,6 @@ class Cart(Base):
             f"{self.schedule_day_of_week} "
             f"{self.schedule_hour}:{self.schedule_minute}"
         )
-
-    def _next_fire_display(self) -> str | None:
-        try:
-            nxt = self.to_timed_trigger().next()
-        except Exception:
-            return None
-        if nxt is None:
-            return None
-        return f"proch. {nxt.strftime('%d/%m %H:%M')}"
 
     @property
     def schedule_is_advanced(self) -> bool:
@@ -272,23 +262,17 @@ class Cart(Base):
                 return True
         return self.schedule_mode is ScheduleMode.TIMED
 
-    def to_timed_trigger(self) -> CronTrigger:
-        """
-        Returns a CronTrigger object from a cart's schedule columns, when it's `timed`.
-        Raises an IndexError if the schedule is invalid.
-
-        Note: APScheduler's week days are 0-7 for sun,mon,tue,wed,thu,fri,sat, sun
-        """
-        return CronTrigger(
-            year=self.schedule_year,
-            month=self.schedule_month,
-            day=self.schedule_day,
-            week=self.schedule_week,
-            day_of_week=self.schedule_day_of_week,
-            hour=self.schedule_hour,
-            minute=self.schedule_minute,
-            second=self.schedule_second,
-        )
+    def schedule_fields_valid(self) -> bool:
+        """Minute/second patterns the clock reads for jingles: ``*`` or 0-59."""
+        for raw, upper in ((self.schedule_minute, 59), (self.schedule_second, 59)):
+            text = str(raw or "*").strip()
+            if text in {"*", ""}:
+                continue
+            for raw_part in text.split(","):
+                part = raw_part.strip().removeprefix("*/")
+                if not part.isdigit() or not 0 <= int(part) <= upper:
+                    return False
+        return True
 
     def recompute_duration(self):
         self.average_duration = sum([s.duration for s in self.sounds]) // len(

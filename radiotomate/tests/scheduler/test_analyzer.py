@@ -3,9 +3,7 @@ from asyncio import sleep
 from quart.testing import QuartClient
 from sqlalchemy.orm import Session as ormSession
 
-from radiotomate.enums import ScheduleMode
 from radiotomate.models import Cart, Sound
-from tests.scheduler import schedule_in_two_seconds
 
 
 async def test_post_analyzer(  # noqa: PLR0913
@@ -16,8 +14,6 @@ async def test_post_analyzer(  # noqa: PLR0913
     fake_sound2: Sound,
     auth: dict,
 ):
-    fake_cart.schedule_mode = ScheduleMode.TIMED
-    schedule_in_two_seconds(fake_cart)
     fake_sound.gain = None
     fake_sound.peak = None
     fake_sound2.gain = None

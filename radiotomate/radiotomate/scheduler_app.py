@@ -3,15 +3,8 @@ The scheduler's ASGI app factory
 """
 
 import logging
-from asyncio import CancelledError
-from inspect import isawaitable
 from pathlib import Path
-from typing import Any, Callable
 
-from apscheduler import AsyncScheduler, Job
-from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
-from apscheduler.eventbrokers.local import LocalEventBroker
-from apscheduler.executors.async_ import AsyncJobExecutor
 from httpx import AsyncClient
 from quart_auth import QuartAuth
 from werkzeug.exceptions import HTTPException
@@ -20,7 +13,7 @@ import radiotomate.models
 from radiotomate.auth import RadiotomateAuth
 from radiotomate.beets import BeetsIntegration
 from radiotomate.db import PathLike, QuartAlchemy
-from radiotomate.quart import CustomQuart, ShutdownError
+from radiotomate.quart import CustomQuart
 from radiotomate.scheduler import (
     alerts,
     analyzer,
@@ -35,51 +28,9 @@ from radiotomate.scheduler import (
     schedule,
     version,
 )
+from radiotomate.scheduler.timers import Timers
 
 _log = logging.getLogger(__name__)
-
-
-class APSChedulerMiddleware:
-    def __init__(self, asgi_app, scheduler):
-        self.asgi_app = asgi_app
-        self.scheduler = scheduler
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] == "lifespan":
-            try:
-                async with self.scheduler:
-                    await self.scheduler.start_in_background()
-                    return await self.asgi_app(scope, receive, send)
-            except (ShutdownError, CancelledError):
-                pass
-        else:
-            return await self.asgi_app(scope, receive, send)
-
-
-class RadiotomateAPSChedulerDataStore(SQLAlchemyDataStore):
-    def get_table_definitions(self):
-        upstream_metadata = super().get_table_definitions()
-        for table in upstream_metadata.tables.values():
-            table.name = "apscheduler_" + table.name
-        return upstream_metadata
-
-
-class RadiotomateJobExecutor(AsyncJobExecutor):
-    """
-    like AsyncJobExecutor, but provides a DB session as the first argument and
-    the current app as the second argument.
-    """
-
-    def __init__(self, app: CustomQuart, db: QuartAlchemy):
-        self.app = app
-        self.db = db
-
-    async def run_job(self, func: Callable[..., Any], job: Job) -> Any:
-        async with self.db.session() as session:
-            retval = func(session, self.app, *job.args, **job.kwargs)
-            if isawaitable(retval):
-                retval = await retval
-            return retval
 
 
 def errors_as_text(exc: Exception) -> str:
@@ -121,9 +72,7 @@ def app_factory(config: dict, beets: BeetsIntegration) -> CustomQuart:
                 "interval_seconds",
                 60,
             ),
-            "RETENTION_ENABLED": bool(
-                config.get("retention", {}).get("enabled", True)
-            ),
+            "RETENTION_ENABLED": bool(config.get("retention", {}).get("enabled", True)),
             "RETENTION_INTERVAL": config.get("retention", {}).get(
                 "interval_seconds", 3600
             ),
@@ -175,12 +124,7 @@ def app_factory(config: dict, beets: BeetsIntegration) -> CustomQuart:
     auth_manager.user_class = RadiotomateAuth
     auth_manager.init_app(app)
 
-    app.scheduler = AsyncScheduler(
-        data_store=RadiotomateAPSChedulerDataStore(db.engine),
-        event_broker=LocalEventBroker(),
-        job_executors={"async": RadiotomateJobExecutor(app, db)},
-        max_concurrent_jobs=1,
-    )
-    app.asgi_app = APSChedulerMiddleware(app.asgi_app, app.scheduler)
+    # One-shot timers (max_duration skips). Recurring carts are the clock's.
+    app.timers = Timers()
 
     return app

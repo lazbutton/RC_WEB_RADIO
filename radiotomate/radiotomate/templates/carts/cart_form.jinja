@@ -120,7 +120,7 @@
             <div class="field">
                 <div class="control select">
                     <select name="schedule" id="schedule" x-model="schedule">
-                        {% for mode in ScheduleMode %}
+                        {% for mode in ScheduleMode if mode.name != 'TIMED' %}
                             <option value="{{ mode.name }}" {{ 'selected' if cart and cart.schedule_mode == mode else '' }}>
                                 {{ mode.label }}
                             </option>

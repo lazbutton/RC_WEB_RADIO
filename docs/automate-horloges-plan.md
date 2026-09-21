@@ -6,11 +6,11 @@
 
 | Piste | Statut réel | Détail |
 |---|---|---|
-| **Phase 0 éditorial** | Partiel | Horloges et dayparts saisis pour le banc ; **banque `10-rotation` vide**, donc l’auto-DJ ne tourne que sur le cart Mimi. Le vrai « qui passe quoi » reste à remplir. |
+| **Phase 0 éditorial** | Partiel | Horloges et dayparts saisis ; banque `10-rotation` = **8 titres nowave** (promotion `promote-inbox.sh`, 21/09), motif « musique ×3 + jingle », flux public ouvert. Le vrai « qui passe quoi » reste à remplir. |
 | **Phase 1 motif** | En prod | `clock.py` (+ `timing.py`, `music_rules.py`), tests `test_clock.py`. |
 | **Phase 2 ancres / sync** | En prod | Ancres dures coupent, souples attendent la fin du titre, `live_hold` pendant un direct. |
 | **Phase 3 conducteur** | En prod | `execution.py` (prévision, réconciliation as-run), `desk.py` (pupitre), API `/rundown`. Source as-run fiabilisée par l’annotation `radiotomate_queue`. |
-| **Phase 4 bascule** | En cours | Mode cart `CLOCK` (défaut) : plus de cron APScheduler pour les carts que l’horloge gère (migration v13 pour les crons par défaut `* :00`). Reste : carts `TIMED` volontaires et `max_duration` encore sur APScheduler 4 alpha. |
+| **Phase 4 bascule** | En prod | Un seul planificateur : APScheduler retiré (dépendance, tables `apscheduler_*` supprimées par la migration v14), carts `TIMED` convertis en `CLOCK`, `max_duration` des sons/relais assuré par des minuteries in-process (`scheduler/timers.py`). ENF-05 tenu. |
 | **Phase 5 recette** | À faire | Playout Linux = Nasgul (Liquidsoap 2.4.5). Critères §12 à cocher avec une banque réelle. |
 | **Proto console** | Livré, branché | La console React `:30126` parle à l’API réelle (plus de mock). |
 

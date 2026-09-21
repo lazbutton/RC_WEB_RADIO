@@ -161,12 +161,9 @@ def apply_schedule(cart: Cart, form: dict) -> Cart:
     cart.schedule_day_of_week = get_or("day_of_week", "*")
     cart.schedule_hour = get_or("hour", "*")
 
-    try:
-        cart.to_timed_trigger()
-        cart.schedule_correct = True
-    except Exception as e:
-        cart.schedule_correct = False
-        _log.warning("incorrect schedule %s, got %r", cart.schedule_repr, e)
+    cart.schedule_correct = cart.schedule_fields_valid()
+    if not cart.schedule_correct:
+        _log.warning("incorrect schedule %s", cart.schedule_repr)
 
     return cart
 
@@ -381,7 +378,7 @@ def _queue_analysis_later(sound_ids: list[int]) -> None:
 
 
 def _poke_schedule(cart: Cart) -> None:
-    """Sync the scheduler job: adds the cron for TIMED, drops it otherwise."""
+    """Tell the scheduler the cart changed (legacy hook, no job to arm)."""
     try:
         Scheduler.get()
     except RuntimeError:
@@ -801,7 +798,7 @@ async def add():
     media_bank.bind_cart_bank(cart)
     await g.dbsession.commit()
 
-    # Always poke: a cart leaving TIMED must lose its APScheduler job too.
+    # Always poke so the scheduler sees the edit.
     current_app.add_background_task(poke_scheduler, cart.id)
 
     return (
@@ -876,7 +873,7 @@ async def edit(cart_id: int):
     media_bank.bind_cart_bank(cart)
     await g.dbsession.commit()
 
-    # Always poke: a cart leaving TIMED must lose its APScheduler job too.
+    # Always poke so the scheduler sees the edit.
     current_app.add_background_task(poke_scheduler, cart.id)
 
     if form.get("coming_from") == "sounds":

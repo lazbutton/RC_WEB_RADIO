@@ -38,9 +38,10 @@ class ScheduleMode(Enum):
     """
     Who decides *when* a cart plays.
 
-    ``CLOCK`` is the target (ENF-05): the cart is only aired by clock positions,
-    anchors or the desk pads; no cron, no APScheduler job. ``TIMED`` keeps the
-    legacy cron for carts the clocks do not cover yet.
+    ``CLOCK`` (ENF-05): the cart is aired by clock positions, anchors or the
+    desk pads. ``JINGLES`` keeps the minute/second pattern read by the clock.
+    ``TIMED`` is the retired cron mode (APScheduler removed, migration v14
+    converts remaining rows to ``CLOCK``); kept so old rows still load.
     """
 
     CLOCK = "clock"
@@ -58,11 +59,7 @@ class ScheduleMode(Enum):
             case ScheduleMode.JINGLES:
                 return "Jingles"
             case ScheduleMode.TIMED:
-                return "Timed"
-
-    @property
-    def uses_cron(self) -> bool:
-        return self is ScheduleMode.TIMED
+                return "Horaire (obsolète)"
 
 
 class PositionKind(Enum):
