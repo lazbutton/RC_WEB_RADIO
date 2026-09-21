@@ -1,0 +1,28 @@
+{
+  "name": "BUTTON webradio",
+  "user": "ubuntu",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "radiotomate interface (:6811)",
+      "command": "export PATH=\"$HOME/.local/bin:$PATH\"; cd radiotomate && poetry run radiotomate -c radio_data/radiotomate.yaml interface --demo"
+    },
+    {
+      "name": "player (:5174)",
+      "command": "cd player && npm run dev"
+    },
+    {
+      "name": "console (:5175)",
+      "command": "cd console && npm run dev"
+    },
+    {
+      "name": "pads (:5176)",
+      "command": "cd pads && npm run dev"
+    },
+    {
+      "name": "hub (:5178)",
+      "command": "cd button/hub && npm run dev"
+    }
+  ],
+  "ports": [6811, 5174, 5175, 5176, 5178]
+}
