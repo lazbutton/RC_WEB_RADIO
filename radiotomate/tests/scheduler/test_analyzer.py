@@ -30,8 +30,13 @@ async def test_post_analyzer(  # noqa: PLR0913
     result_text = (await result.data).decode()
     assert result.status_code == 200, "got non-OK response:" + result_text
 
-    # just a slight delay so the background task can update fields
-    await sleep(0.1)
+    # the background task updates the fields; CI runners can be slow
+    for _ in range(50):
+        await sleep(0.1)
+        await dbsession.refresh(fake_sound)
+        await dbsession.refresh(fake_sound2)
+        if fake_sound.gain is not None and fake_sound2.gain is not None:
+            break
     await dbsession.refresh(fake_sound)
     assert fake_sound.gain is not None
     assert fake_sound.peak is not None
