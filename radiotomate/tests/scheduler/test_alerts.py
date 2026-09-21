@@ -1,9 +1,13 @@
 import json
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 
 from radiotomate.scheduler import alerts, metrics
+
+PARIS = ZoneInfo("Europe/Paris")
 
 
 class _Spy:
@@ -118,3 +122,46 @@ async def test_metrics_snapshot_roundtrip(tmp_path: Path):
     assert reg.tick_run_total == 7
     assert reg.restored_from == saved["saved_at"]
     reg.reset()
+
+
+def _paris(day: int, hour: int, minute: int, second: int = 0) -> datetime:
+    # 2026-09-21 is a Monday (weekday 0)
+    return datetime(2026, 9, 21 + day, hour, minute, second, tzinfo=PARIS)
+
+
+async def test_ef01_live_slot_without_encoder_opens_after_grace_and_resolves():
+    spy = _Spy()
+    monitor = alerts.AlertMonitor(_settings(live_grace_seconds=90), spy)
+    monitor.live_slots = [
+        alerts.LiveSlot(
+            title="QG St Aignan",
+            day_of_week=2,
+            start_minute=20 * 60,
+            end_minute=22 * 60,
+        )
+    ]
+    clock = {"silence_s": "0.0", "source": "carts"}
+
+    # Tuesday, nothing scheduled: quiet.
+    assert await monitor.step(clock, 1.0, now=_paris(1, 20, 1)) == []
+    # Wednesday 20:00:30, inside the grace period: still quiet.
+    assert await monitor.step(clock, 1.0, now=_paris(2, 20, 0, 30)) == []
+    # 20:02 with the clock on air → EF-01 incident, naming the safety net.
+    assert await monitor.step(clock, 1.0, now=_paris(2, 20, 2)) == ["open:live_absent"]
+    body = spy.sent[0]["body"]
+    assert "QG St Aignan 20:00-22:00" in body
+    assert "carts" in body
+    # Encoder finally connects → resolved.
+    live = {"silence_s": "0.0", "source": "stream"}
+    assert await monitor.step(live, 1.0, now=_paris(2, 20, 5)) == [
+        "resolved:live_absent"
+    ]
+    # Slot over without encoder: no incident either.
+    assert await monitor.step(clock, 1.0, now=_paris(2, 22, 30)) == []
+
+
+def test_ef01_playout_down_does_not_double_report():
+    slot = alerts.LiveSlot("x", 2, 20 * 60, 21 * 60)
+    assert (
+        alerts.live_slot_without_encoder([slot], None, _paris(2, 20, 10), 90.0) is None
+    )

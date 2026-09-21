@@ -23,7 +23,7 @@ Scheduler (`radiotomate/scheduler/`) :
 - Le tick 1 Hz de Liquidsoap n’exécute l’horloge que si l’état a changé, à la minute, ou à moins de 10 s de la fin du titre (`live.should_run_tick`, compteur `tick_gated_total`).
 - `retention.py` : purge bornée (conducteur joué, commandes acquittées, versions orphelines) et export JSONL de `metadata_log` (`data/exports/`). Config `retention:`.
 - `metrics.py` : `/metrics` persisté dans `data/metrics.json`, une ligne / heure dans `data/exports/metrics.jsonl`. Config `metrics:`.
-- `alerts.py` : silence, playout injoignable, heartbeat → log, webhook, tâche Vikunja. Config `alerts:`.
+- `alerts.py` : silence, playout injoignable, heartbeat, créneau live sans encodeur (EF-01, `live_absent`) → log, webhook, tâche Vikunja. Config `alerts:`.
 - ReplayGain : un titre Beets sans `rg_track_gain` est analysé à la prévision (`analyze_item_soon`) puis au besoin au push (`ensure_item_gain`) ; plus de push sans gain.
 - Carts : mode `CLOCK` (défaut) = joué par les horloges et les pads, sans cron APScheduler ; migration v13 bascule les crons par défaut `* :00`.
 

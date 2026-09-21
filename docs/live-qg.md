@@ -65,7 +65,24 @@ Recette : titre en cours → `on` → niveau bed −15 dB en ~1 s, micro audible
 
 - Playout : **Liquidsoap 2.4.5** sur Nasgul. Le commentaire « transitions cassées LS 2.3 (#4179) » dans le `.liq` date de 2.3 : `crossfade_3s` ne fait **aucun** fondu (il ne fait que noter la source à l’antenne). À re-tester sur banc avant d’activer un vrai `cross` ; les jingles coupent net (« ducking jingles » = chantier E).
 - Harbor : recette BUTT **pas encore faite** contre Nasgul (`192.168.1.100:6800` ou Tailscale). Le retour de direct vide `jingles` + `autodj` et laisse la file `carts`.
-- EF-01 (créneau live sans encodeur) : aucun filet déclaré ; l’auto-DJ reprend simplement. À trancher éditorialement avant de coder.
+- Transitions : le bug amont [savonet/liquidsoap#4179](https://github.com/savonet/liquidsoap/issues/4179) (transitions de `fallback` inopérantes depuis 2.3) est **toujours ouvert** ; ne pas remettre `fade.in`/`fade.out` dans `crossfade_3s` sans banc. Banc sans toucher la prod : `docker run --rm -v <liq>:/t.liq -e RTCONFIG=… ghcr.io/lazbutton/button-playout:main liquidsoap /t.liq` sur Nasgul avec deux WAV et un harbor sur un autre port.
+- Ducking jingles : même dépendance au banc. Piste : `add([amplify({duck}, autodj), jingles])` à la place du `fallback` interne, avec `current_source_id` posé par `jingles.on_track` — à écouter avant de coder, car ça change le sens de « jingle à l’antenne » pour le conducteur.
+
+## EF-01 — créneau live sans encodeur : le filet est l’horloge
+
+Décision : **le filet d’un créneau `live` est la grille elle-même** (daypart → horloge → cart de repli), qui couvre 24/24. Rien n’est poussé « par accident » : à H, si le harbor n’est pas là, l’horloge continue, jamais de `blank()` ni de file vide. Ce qui manquait, c’est de le *déclarer* et de le *voir*.
+
+- Créneaux live = `Emission` hebdo (jour, début, fin), édités dans la console (Semaine).
+- `alerts.py` : après `live_grace_seconds` (90 s par défaut) sans source harbor pendant un créneau actif, incident **`live_absent`** « EF-01 QG St Aignan 20:00-22:00 : encodeur absent, filet horloge à l’antenne (carts) » → log, webhook, tâche Vikunja ; **rétabli** dès que l’encodeur connecte ou que le créneau finit. `playout_down` prime (pas de double alerte).
+- Recette : créer une émission hebdo sur le créneau courant, attendre 2 min sans BUTT → tâche Vikunja ; lancer BUTT → tâche close.
+
+## Recette BUTT contre Nasgul (à faire)
+
+1. Compte Radiotomate avec rôle `stream` (`radiotomate users add qg --can stream`, dans `button-radiotomate-interface-1`).
+2. BUTT : serveur `192.168.1.100` (ou l’IP Tailscale de Nasgul), port **6800**, type Icecast, mount `/stream`, user/pass du compte, MP3 128–192 k, 48 kHz.
+3. Vérifier `GET :6822/live` → `source: stream` ; le player `now.json` doit afficher l’émission de la session.
+4. Stop BUTT → retour sur un **nouveau** titre (`autodj`/`jingles` vidés, `carts` gardée) ; noter le temps de bascule et tout « bégaiement » (monter `input_min_buffer` si besoin).
+5. Rejouer avec l’alerte EF-01 armée (créneau hebdo courant) pour valider l’aller-retour incident.
 
 ## Recette
 

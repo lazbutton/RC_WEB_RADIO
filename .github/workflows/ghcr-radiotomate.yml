@@ -22,6 +22,10 @@ jobs:
   tests:
     name: pytest (scheduler, models, migrations)
     runs-on: ubuntu-latest
+    # Same zone as the prod containers (compose TZ): the scheduler keeps
+    # Paris-naive timestamps and a few tests build them with datetime.now().
+    env:
+      TZ: Europe/Paris
     defaults:
       run:
         working-directory: radiotomate
@@ -34,7 +38,8 @@ jobs:
       - name: Install poetry
         run: pipx install poetry
       - name: Install dependencies
-        run: poetry install --no-interaction --no-root
+        # With the root package: `radiotomate` CLI and version are under test.
+        run: poetry install --no-interaction
       - name: Ruff (advisory until the backlog is cleared)
         continue-on-error: true
         run: |
