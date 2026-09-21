@@ -1,0 +1,5 @@
+/*
+  Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src https: data:; media-src https: http:; connect-src 'self' https:; frame-ancestors https://orleans.radiocampus.org https://*.radiocampus.org
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Cache-Control: public, max-age=300

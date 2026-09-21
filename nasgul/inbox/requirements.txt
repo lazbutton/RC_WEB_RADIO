@@ -1,0 +1,9 @@
+fastapi==0.128.0
+uvicorn==0.40.0
+python-multipart==0.0.22
+httpx==0.28.1
+imap-tools==1.11.0
+pydantic-settings==2.11.0
+mutagen==1.47.0
+mutagen==1.47.0
+pypdf==5.9.0

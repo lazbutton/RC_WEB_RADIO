@@ -9,9 +9,13 @@ Un seul dépôt GitHub (`lazbutton/RC_WEB_RADIO`). Commencer par le README du do
 | Projet | Dossier | Rôle |
 |---|---|---|
 | Player public | [`player/`](player/README.md) | Site auditeur : lecture du flux + titre en cours |
+| Kiosk Aero | [`kiosk/`](kiosk/README.md) | App Android 24/24 (ExoPlayer, Face nappe) |
 | Console producteurs | [`radiotomate/`](radiotomate/README.md) | Automate BUTTON (dérivé Radiotomate, AGPL) — UI, carts, live, auto-DJ |
 | Infra | [`ops/`](ops/README.md) | Icecast, Caddy, YAML Labomedia, banc Mac, runbook |
 | Proto automate (DA) | [`console/`](console/README.md) | Squelette horloges Radix — **pas** la prod `:6811` |
+| Régie (hub d’équipe) | [`regie/`](regie/README.md) | Mails, contacts, événements Outlive, planning + Google Agenda, émissions/podcasts, publication, vie de la radio — sur Nasgul |
+| Blocs publics | [`rco-site/`](rco-site/README.md) | Bord statique (iframes, RSS) publié par Régie pour orleans.radiocampus.org |
+| Nasgul | [`nasgul/`](nasgul/runbook-regie.md) | Runbooks TrueNAS : Régie, Inbox Zero (repris), Vikunja (à arrêter) |
 
 Docs transverses : [`docs/`](docs/README.md) (architecture, comptes, live QG).  
 Ancien boîtier Pi « radio complète » : [`docs/archive/`](docs/archive/README.md) — **pas** la prod.
@@ -20,6 +24,7 @@ Ancien boîtier Pi « radio complète » : [`docs/archive/`](docs/archive/README
 
 - **Son et antenne** → `radiotomate/` (interface `:6811`). Le playout Liquidsoap ne tourne vraiment que sous Linux (Podman + systemd).
 - **Écoute / DA site** → `player/`
+- **Hub d’équipe (mails, contacts, planning, podcasts)** → `regie/` (`http://nasgul.taild4714f.ts.net:30130`)
 - **Déploiement Labomedia ou banc local** → `ops/`
 - **Squelette horloges (hors moteur)** → `console/` (`http://127.0.0.1:5175/`) — proto de DA, pas Quart.
 

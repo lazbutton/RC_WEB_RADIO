@@ -1,0 +1,17 @@
+services:
+  inboxzero:
+    image: nasgul-inboxzero:local
+    restart: unless-stopped
+    ports:
+      - "30128:30128"
+    environment:
+      TZ: Europe/Paris
+      INBOXZERO_DATA: /data
+    env_file:
+      - /mnt/data/apps/inboxzero/secrets.env
+    volumes:
+      - /mnt/data/apps/inboxzero/data:/data
+    mem_limit: 512m
+    cpus: "1.0"
+    security_opt:
+      - no-new-privileges:true

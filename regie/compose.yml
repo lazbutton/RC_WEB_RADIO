@@ -1,0 +1,50 @@
+# Régie sur Nasgul (TrueNAS, app custom). Deux services : Postgres dédié + API/UI.
+# Secrets : /mnt/data/apps/regie/secrets.env (jamais dans le dépôt). Voir secrets.env.example.
+services:
+  regie-pg:
+    image: postgres:18.6-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: regie
+      POSTGRES_USER: regie
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+    env_file:
+      - /mnt/data/apps/regie/secrets.env
+    volumes:
+      - /mnt/data/apps/regie/pg:/var/lib/postgresql
+    ports:
+      # Postgres joignable seulement via Tailscale (worker de transcription sur le Mac). Jamais exposé ailleurs.
+      - "${NASGUL_TS_IP:-127.0.0.1}:30131:5432"
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=60", "-c", "wal_compression=on"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U regie -d regie"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 384m
+    security_opt:
+      - no-new-privileges:true
+
+  regie:
+    image: nasgul-regie:local
+    restart: unless-stopped
+    depends_on:
+      regie-pg:
+        condition: service_healthy
+    ports:
+      - "30130:30130"
+    environment:
+      TZ: Europe/Paris
+      REGIE_DATA: /data
+      REGIE_MEDIA_ROOT: /media
+      REGIE_DSN: postgresql://regie:${POSTGRES_PASSWORD}@regie-pg:5432/regie
+    env_file:
+      - /mnt/data/apps/regie/secrets.env
+    volumes:
+      - /mnt/data/apps/regie/data:/data
+      - /mnt/data/media/button:/media
+      - /mnt/backup/regie:/backups
+    mem_limit: 768m
+    cpus: "1.5"
+    security_opt:
+      - no-new-privileges:true

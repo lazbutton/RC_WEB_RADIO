@@ -1,0 +1,44 @@
+:root {
+  --bg: #000000;
+  --text: #f5f5f7;
+  --muted: #9b9ba1;
+  --faint: #6e6e73;
+  --hair: rgb(255 255 255 / 0.08);
+  --hair-strong: rgb(255 255 255 / 0.16);
+  --surface-1: rgb(255 255 255 / 0.03);
+  --surface-2: rgb(255 255 255 / 0.06);
+  --surface-3: rgb(255 255 255 / 0.1);
+  --live: #ff4d4d;
+  --ok: #3ecf8e;
+  --warn: #d4a017;
+  --live-soft: rgb(255 77 77 / 0.14);
+  --ok-soft: rgb(62 207 142 / 0.14);
+  --warn-soft: rgb(212 160 23 / 0.16);
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-1: 0.72rem;
+  --fs-2: 0.8rem;
+  --fs-3: 0.875rem;
+  --fs-4: 1rem;
+  --fs-5: 1.25rem;
+  --fs-6: 1.5rem;
+  --t-fast: 120ms;
+  --t-base: 180ms;
+  --t-slow: 260ms;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --radius: 10px;
+  --radius-sm: 6px;
+  --row-pad-y: 0.78rem;
+  --row-pad-x: 0.9rem;
+  --row-gap: 0.7rem;
+  --preview-lines: 1;
+  --shadow: 0 18px 50px rgb(0 0 0 / 0.55), 0 0 0 1px var(--hair-strong);
+}
+
+[data-density="compact"] {
+  --row-pad-y: 0.5rem;
+  --row-pad-x: 0.75rem;
+  --row-gap: 0.55rem;
+  --fs-3: 0.83rem;
+}

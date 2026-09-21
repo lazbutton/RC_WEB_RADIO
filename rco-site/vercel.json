@@ -1,0 +1,15 @@
+{
+  "cleanUrls": true,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Content-Security-Policy", "value": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src https: data:; media-src https: http:; connect-src 'self' https:; frame-ancestors https://orleans.radiocampus.org https://*.radiocampus.org" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    },
+    { "source": "/rss/(.*)", "headers": [{ "key": "Content-Type", "value": "application/rss+xml; charset=utf-8" }] }
+  ]
+}
