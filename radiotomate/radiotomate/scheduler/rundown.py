@@ -443,6 +443,12 @@ async def _prepare_sequential(  # noqa: PLR0913
         gain = getattr(item, "rg_track_gain", None)
         if gain is not None:
             payload["rg_track_gain"] = gain
+        elif getattr(item, "id", None) is not None and hasattr(
+            beets, "analyze_item_soon"
+        ):
+            # No ReplayGain yet (import without the plugin): analyse it now so the
+            # gain is known by the time the track is pushed to Liquidsoap.
+            beets.analyze_item_soon(item.id)
         return payload, length, artist, title
     if pos.kind in {
         PositionKind.JINGLE.value,

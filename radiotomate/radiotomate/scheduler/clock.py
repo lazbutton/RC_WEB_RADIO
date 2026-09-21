@@ -1,24 +1,34 @@
 """
 Clock sequencer: motif + hard anchors → existing Liquidsoap queues.
 
-Jingles cut the program (current graph). Sequential jingles are only pushed when
-the current track is nearly over, so the motif intercalates without eating a
-title mid-way. Hard anchors still cut.
+Jingles cut Auto-DJ, never live / relay / a cart on air. Sequential jingles are
+only pushed when the current track is nearly over. Hard anchors still cut — except
+while the harbor is on air: the clock pauses, skips nothing, and drops due
+anchors so they are not dumped after the live.
+
+Hard-sync must not skip the output bed: that consumes the next Auto-DJ request
+before the cart is ready. After the pub/jingle is on air, skip autodj_queue only.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from random import choice
+from datetime import datetime
 from time import perf_counter
 from typing import TYPE_CHECKING
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
-from radiotomate.enums import CartMode, PlayoutAction, PositionKind, RundownStatus, WhenMode
+from radiotomate.domain.emission import is_harbor_source
+from radiotomate.enums import (
+    CartMode,
+    PlayoutAction,
+    PositionKind,
+    RundownStatus,
+    WhenMode,
+)
 from radiotomate.models import (
     AutoDJSlot,
     Cart,
@@ -30,8 +40,35 @@ from radiotomate.models import (
     Sound,
 )
 from radiotomate.scheduler.metrics import runtime_metrics
+from radiotomate.scheduler.music_rules import (  # noqa: F401 — re-exported
+    ARTIST_LAST_N,
+    ARTIST_WINDOW,
+    TITLE_LAST_N,
+    _choose_item,
+    _music_history,
+    _pick_music,
+    _rule_sets,
+)
 from radiotomate.scheduler.outbox import dispatch_command, enqueue_command
 from radiotomate.scheduler.playout import PlayoutGateway, gateway_for
+from radiotomate.scheduler.timing import (  # noqa: F401 — re-exported
+    JINGLE_PREEMPT_REMAINING,
+    PARIS,
+    _next_anchor,
+    anchor_in_daypart,
+    can_push_sequential_jingle,
+    next_hard_anchor,
+    next_hard_anchor_minute,
+    next_soft_anchor,
+    now_from_live,
+    now_paris,
+    queue_empty,
+    queued_count,
+    remaining_seconds,
+    sequential_kind_cycle,
+    source_id,
+    track_would_overflow_anchor,
+)
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
@@ -47,11 +84,6 @@ def _finish_tick(started: float, actions: list[str]) -> list[str]:
     return actions
 
 
-PARIS = ZoneInfo("Europe/Paris")
-ARTIST_WINDOW = timedelta(minutes=60)
-ARTIST_LAST_N = 3
-TITLE_LAST_N = 20
-JINGLE_PREEMPT_REMAINING = 3.0
 SETTING_CLOCK_SEQ_CURSOR = "clock_seq_cursor"
 SETTING_CLOCK_SEQ_CLOCK_ID = "clock_seq_clock_id"
 SETTING_CLOCK_SEQ_EPOCH = "clock_seq_epoch"
@@ -76,6 +108,8 @@ class SequencerState:
     persisted_snapshot: tuple[int, int | None, frozenset] | None = None
     active_cart_id: int | None = None
     epoch: int = 0
+    pending_autodj_skip: bool = False
+    pending_autodj_skip_minute: int | None = None
 
 
 _state = SequencerState()
@@ -90,141 +124,13 @@ def reset_state() -> None:
     _state.persisted_snapshot = None
     _state.active_cart_id = None
     _state.epoch = 0
+    _state.pending_autodj_skip = False
+    _state.pending_autodj_skip_minute = None
 
 
 def note_carts_push(cart_id: int) -> None:
     """Remember which cart currently owns the carts Liquidsoap queue."""
     _state.active_cart_id = cart_id
-
-
-def now_paris(now: datetime | None = None) -> datetime:
-    if now is None:
-        return datetime.now(PARIS)
-    if now.tzinfo is None:
-        return now.replace(tzinfo=PARIS)
-    return now.astimezone(PARIS)
-
-
-def now_from_live(live_data: dict, now: datetime | None = None) -> datetime:
-    if now is not None:
-        return now_paris(now)
-    raw = live_data.get("time")
-    if isinstance(raw, str) and raw:
-        try:
-            return now_paris(datetime.fromisoformat(raw))
-        except ValueError:
-            pass
-    return now_paris()
-
-
-def queue_empty(live_data: dict, key: str) -> bool:
-    nxt = live_data.get(key)
-    if not isinstance(nxt, dict):
-        return False
-    return nxt.get("rid") == -1
-
-
-def queued_count(live_data: dict, queued_key: str, cue_key: str) -> int:
-    raw = live_data.get(queued_key)
-    if raw is not None and raw != "":
-        try:
-            return max(0, int(raw))
-        except (TypeError, ValueError):
-            pass
-    return 0 if queue_empty(live_data, cue_key) else 1
-
-
-def remaining_seconds(live_data: dict) -> float:
-    try:
-        return float(live_data.get("remaining") or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def source_id(live_data: dict) -> str:
-    raw = str(live_data.get("source") or "")
-    if raw in {"jingles", "carts", "stream", "relay"}:
-        return raw
-    # Auto-DJ, files d’attente internes LS (`insert_initial*`,
-    # `replay_metadata`, `programs`, …) : ne pas relancer les jingles.
-    return "autodj"
-
-
-def anchor_in_daypart(slot_start: int, slot_end: int, hour: int, minute: int) -> bool:
-    """Civil HH:mm is in [slot_start, slot_end)."""
-    t = hour * 60 + minute
-    return slot_start <= t < slot_end
-
-
-def next_hard_anchor_minute(
-    now: datetime,
-    slot_start: int,
-    slot_end: int,
-    anchored: list[ClockPosition],
-) -> int | None:
-    """Soonest future hard-anchor minute-of-day still in this daypart, or None."""
-    found = next_hard_anchor(now, slot_start, slot_end, anchored)
-    if found is None:
-        return None
-    dt, _pos = found
-    return dt.hour * 60 + dt.minute
-
-
-def next_hard_anchor(
-    now: datetime,
-    slot_start: int,
-    slot_end: int,
-    anchored: list[ClockPosition],
-) -> tuple[datetime, ClockPosition] | None:
-    """Soonest future hard anchor still in this daypart, or None."""
-    return _next_anchor(now, slot_start, slot_end, anchored, hard=True)
-
-
-def next_soft_anchor(
-    now: datetime,
-    slot_start: int,
-    slot_end: int,
-    anchored: list[ClockPosition],
-) -> tuple[datetime, ClockPosition] | None:
-    """Soonest future soft anchor still in this daypart, or None."""
-    return _next_anchor(now, slot_start, slot_end, anchored, hard=False)
-
-
-def _next_anchor(
-    now: datetime,
-    slot_start: int,
-    slot_end: int,
-    anchored: list[ClockPosition],
-    *,
-    hard: bool,
-) -> tuple[datetime, ClockPosition] | None:
-    soonest: datetime | None = None
-    soonest_pos: ClockPosition | None = None
-    for pos in anchored:
-        if pos.minute is None:
-            continue
-        if hard and not pos.is_hard_sync:
-            continue
-        if not hard and not pos.is_soft_sync:
-            continue
-        for hour in range(24):
-            mod = hour * 60 + pos.minute
-            if not (slot_start <= mod < slot_end):
-                continue
-            candidate = now.replace(
-                hour=hour,
-                minute=pos.minute,
-                second=0,
-                microsecond=0,
-            )
-            if candidate <= now:
-                continue
-            if soonest is None or candidate < soonest:
-                soonest = candidate
-                soonest_pos = pos
-    if soonest is None or soonest_pos is None:
-        return None
-    return soonest, soonest_pos
 
 
 def _session_engine(session: ormSession):
@@ -354,45 +260,7 @@ async def load_sequencer_cursor(session: ormSession) -> tuple[int, int | None]:
     return cursor, clock_id
 
 
-def track_would_overflow_anchor(
-    now: datetime,
-    remaining: float,
-    track_length: float,
-    anchor_minute_of_day: int,
-) -> bool:
-    hour, minute = divmod(anchor_minute_of_day, 60)
-    anchor_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if anchor_dt <= now:
-        return False
-    seconds_until = (anchor_dt - now).total_seconds()
-    start_delay = max(0.0, remaining)
-    return start_delay + track_length > seconds_until
-
-
-def can_push_sequential_jingle(live_data: dict) -> bool:
-    """Avoid cutting a title mid-way; hard anchors still cut separately.
-
-    Ne jamais enchaîner un jingle pendant qu’un jingle/cart est à l’antenne :
-    le fallback Liquidsoap resterait collé sur cette file. Un jingle séquentiel
-    ne coupe pas non plus les titres Auto-DJ déjà en file : il attend que la
-    file autodj soit vide (fin du titre en cours).
-    """
-    src = source_id(live_data)
-    remaining = remaining_seconds(live_data)
-    if src in {"jingles", "carts", "stream", "relay"}:
-        return False
-    if queued_count(live_data, "autodj_queued", "next_autodj") > 0:
-        return False
-    if remaining > JINGLE_PREEMPT_REMAINING:
-        return False
-    return True
-
-
-def sequential_kind_cycle(clock: Clock) -> list[str]:
-    return [p.kind for p in clock.sequential_positions()]
-
-
-async def tick(  # noqa: PLR0912, PLR0915
+async def tick(  # noqa: PLR0915
     session: ormSession,
     live_data: dict,
     playout_client: AsyncClient,
@@ -406,11 +274,17 @@ async def tick(  # noqa: PLR0912, PLR0915
     actions: list[str] = []
     started = perf_counter()
     await restore_sequencer_state(session)
-    from radiotomate.scheduler.outbox import dispatch_pending_commands
-
     gateway = gateway_for(playout_client)
-    await dispatch_pending_commands(session, gateway)
-    await _refill_active_cart(session, live_data, gateway, actions)
+    harbor = is_harbor_source(live_data.get("source"))
+    if harbor:
+        _state.pending_autodj_skip = False
+        _state.pending_autodj_skip_minute = None
+    if not harbor:
+        from radiotomate.scheduler.outbox import dispatch_pending_commands
+
+        await dispatch_pending_commands(session, gateway)
+        await _refill_active_cart(session, live_data, gateway, actions)
+        await _skip_cut_autodj_if_ready(live_data, gateway, now, actions)
     minute_of_day = now.hour * 60 + now.minute
     slot = await AutoDJSlot.from_time(session, minute_of_day, now.weekday())
     if slot is None or not slot.clock_id:
@@ -419,12 +293,26 @@ async def tick(  # noqa: PLR0912, PLR0915
             minute_of_day,
             now.weekday(),
         )
+        if harbor:
+            actions.append("live_hold")
         await persist_sequencer_cursor(session)
         return _finish_tick(started, actions)
 
     clock = await Clock.from_id(session, slot.clock_id)
     if clock is None:
         _log.warning("Clock %s missing; not filling queues", slot.clock_id)
+        if harbor:
+            actions.append("live_hold")
+        await persist_sequencer_cursor(session)
+        return _finish_tick(started, actions)
+
+    if harbor:
+        actions.append("live_hold")
+        today = now.date().isoformat()
+        _state.fired_anchors = {k for k in _state.fired_anchors if k[0] == today}
+        nxt = await AutoDJSlot.next_after(session, slot)
+        slot_end = slot.daypart_end_minute(nxt)
+        _hold_due_anchors(clock, slot.minute, slot_end, now, actions)
         await persist_sequencer_cursor(session)
         return _finish_tick(started, actions)
 
@@ -531,6 +419,107 @@ async def _load_pushable_sequential(session: ormSession) -> list[RundownItem]:
     )
 
 
+def _on_air_title(live_data: dict) -> str:
+    return str(live_data.get("title") or "").strip()
+
+
+def _on_air_artist(live_data: dict) -> str:
+    return str(live_data.get("artist") or "").strip()
+
+
+def _item_matches_on_air(item: RundownItem, live_data: dict) -> bool:
+    on_id = str(live_data.get("radiotomate_sound_id") or "").strip()
+    if on_id and item.sound_id is not None and str(item.sound_id) == on_id:
+        return True
+    artist, title = _meta_from_item(item)
+    on_title = _on_air_title(live_data)
+    on_artist = _on_air_artist(live_data)
+    if not title or not on_title:
+        return False
+    return title == on_title and (not artist or not on_artist or artist == on_artist)
+
+
+def _cue_from_item(item: RundownItem) -> dict:
+    artist, title = _meta_from_item(item)
+    cue: dict = {"title": title, "artist": artist, "rid": 1}
+    try:
+        duration = float(item.duration or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    if duration > 0:
+        cue["duration"] = duration
+    if item.path:
+        cue["initial_uri"] = item.path
+    if item.sound_id is not None:
+        cue["radiotomate_sound_id"] = str(item.sound_id)
+    return cue
+
+
+def _next_field_for_item(item: RundownItem) -> str:
+    if _is_jingle_item(item):
+        return "next_jingle"
+    if item.queue == "carts":
+        return "next_cart"
+    return "next_autodj"
+
+
+def _ls_cue_usable(value: object, live_data: dict) -> bool:
+    """True if Liquidsoap already exposes a next different from on-air."""
+    parsed = value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(parsed, dict):
+        return False
+    try:
+        rid = int(parsed.get("rid", -1))
+    except (TypeError, ValueError):
+        rid = -1
+    title = str(parsed.get("title") or "").strip()
+    artist = str(parsed.get("artist") or "").strip()
+    if rid < 0 and not title:
+        return False
+    on_title = _on_air_title(live_data)
+    on_artist = _on_air_artist(live_data)
+    same_title = bool(on_title) and title == on_title
+    same_artist = not artist or not on_artist or artist == on_artist
+    if same_title and same_artist:
+        return False
+    on_id = str(live_data.get("radiotomate_sound_id") or "").strip()
+    cue_id = str(parsed.get("radiotomate_sound_id") or "").strip()
+    if on_id and cue_id and on_id == cue_id:
+        return False
+    return bool(title or rid > 0)
+
+
+async def peek_next_sequential(
+    session: ormSession,
+    live_data: dict,
+) -> tuple[str, dict] | None:
+    """Next planned sequential item that is not the title on air (UI only, no push)."""
+    pending = await _load_pushable_sequential(session)
+    for item in pending:
+        if not (item.path or "").strip():
+            continue
+        if _item_matches_on_air(item, live_data):
+            continue
+        return _next_field_for_item(item), _cue_from_item(item)
+    return None
+
+
+async def overlay_rundown_next(session: ormSession, live_data: dict) -> None:
+    """Fill empty/duplicate LS next_* with the next rundown item."""
+    peeked = await peek_next_sequential(session, live_data)
+    if not peeked:
+        return
+    field, cue = peeked
+    if _ls_cue_usable(live_data.get(field), live_data):
+        return
+    live_data[field] = cue
+
+
 async def _planned_anchor_item(
     session: ormSession,
     pos: ClockPosition,
@@ -548,9 +537,7 @@ async def _planned_anchor_item(
         )
     )
     matched = [
-        row
-        for row in rows
-        if pos.id is not None and row.clock_position_id == pos.id
+        row for row in rows if pos.id is not None and row.clock_position_id == pos.id
     ]
     pool = matched or [
         row
@@ -570,6 +557,24 @@ async def _planned_anchor_item(
         ):
             return row
     return None
+
+
+async def _beets_track_gain(beets_id: int) -> str | None:
+    """
+    ReplayGain of a Beets track, computed on the spot when the import skipped it.
+    Returns ``None`` outside an application context (unit tests) or on failure.
+    """
+    from radiotomate.beets import BeetsIntegration
+
+    try:
+        beets = BeetsIntegration.get()
+    except (RuntimeError, KeyError):
+        return None
+    try:
+        return await beets.ensure_item_gain(beets_id)
+    except Exception:
+        _log.exception("ReplayGain lookup failed for beets item %s", beets_id)
+        return None
 
 
 async def _push_existing_rundown_item(
@@ -599,6 +604,17 @@ async def _push_existing_rundown_item(
     details = dict(item.details or {})
     if details.get("rg_track_gain") is not None:
         payload.setdefault("rg_track_gain", details["rg_track_gain"])
+    if item.beets_id and payload.get("rg_track_gain") is None:
+        gain = await _beets_track_gain(item.beets_id)
+        if gain is not None:
+            payload["rg_track_gain"] = gain
+            item.details = {**details, "rg_track_gain": gain}
+        else:
+            _log.warning(
+                "Beets item %s pushed without ReplayGain (rundown %s)",
+                item.beets_id,
+                item.id,
+            )
     command = await enqueue_command(
         session,
         action=PlayoutAction.QUEUE.value,
@@ -766,6 +782,94 @@ async def _refill_active_cart(
         await session.commit()
 
 
+async def _skip_cut_autodj_if_ready(
+    live_data: dict,
+    gateway: PlayoutGateway,
+    now: datetime,
+    actions: list[str],
+) -> None:
+    """Skip autodj_queue once the hard-sync cart is on air, not the output bed."""
+    if not _state.pending_autodj_skip:
+        return
+    src = source_id(live_data)
+    if src in {"stream", "relay"}:
+        _state.pending_autodj_skip = False
+        _state.pending_autodj_skip_minute = None
+        return
+    if src not in {"carts", "jingles"}:
+        if (
+            _state.pending_autodj_skip_minute is not None
+            and now.minute != _state.pending_autodj_skip_minute
+        ):
+            _state.pending_autodj_skip = False
+            _state.pending_autodj_skip_minute = None
+        return
+    skip = await gateway.skip({"queue": "autodj"})
+    if skip.ok:
+        _state.pending_autodj_skip = False
+        _state.pending_autodj_skip_minute = None
+        actions.append("skip")
+        return
+    if not skip.transient:
+        _state.pending_autodj_skip = False
+        _state.pending_autodj_skip_minute = None
+        _log.error("Deferred autodj skip after hard-sync failed: %s", skip.error)
+
+
+async def _remember_cut_autodj(
+    session: ormSession,
+    live_data: dict,
+    now: datetime,
+) -> None:
+    """Keep the cut title out of the next Beets pick even if it never logged on_air."""
+    artist = str(live_data.get("artist") or "").strip()
+    title = str(live_data.get("title") or "").strip()
+    if not artist and not title:
+        return
+    payload = {
+        "source": "autodj",
+        "artist": artist,
+        "title": title,
+        "album": str(live_data.get("album") or ""),
+        "initial_uri": str(
+            live_data.get("initial_uri") or live_data.get("source_url") or ""
+        ),
+        "on_air": now.replace(tzinfo=None).isoformat(sep=" ")
+        if now.tzinfo
+        else now.isoformat(sep=" "),
+        "skipped": True,
+        "skip_reason": "hard_sync",
+    }
+    item_id = live_data.get("radiotomate_item_id")
+    if item_id:
+        payload["radiotomate_item_id"] = item_id
+    log = await MetadataLog.from_playout(session, payload)
+    session.add(log)
+
+
+def _hold_due_anchors(
+    clock: Clock,
+    slot_start: int,
+    slot_end: int,
+    now: datetime,
+    actions: list[str],
+) -> None:
+    """Drop due anchors while harbor is on air so they are not dumped after the live."""
+    for pos in clock.anchored_positions():
+        if pos.minute is None or not (pos.is_hard_sync or pos.is_soft_sync):
+            continue
+        if not anchor_in_daypart(slot_start, slot_end, now.hour, pos.minute):
+            continue
+        occurrence = now.replace(minute=pos.minute, second=0, microsecond=0)
+        if now < occurrence:
+            continue
+        key = (now.date().isoformat(), now.hour, pos.minute)
+        if key in _state.fired_anchors:
+            continue
+        _state.fired_anchors.add(key)
+        actions.append(f"anchor:{pos.minute}:hold")
+
+
 async def _fire_due_anchors(  # noqa: PLR0913
     session: ormSession,
     live_data: dict,
@@ -807,12 +911,10 @@ async def _fire_due_anchors(  # noqa: PLR0913
         _state.fired_anchors.add(key)
         actions.append(f"anchor:{pos.minute}")
         src = source_id(live_data)
-        if src != "carts":
-            skip = await gateway.skip()
-            if skip.ok:
-                actions.append("skip")
-            else:
-                _log.error("Hard-sync skip failed: %s", skip.error)
+        if src not in {"carts", "stream", "relay"}:
+            await _remember_cut_autodj(session, live_data, now)
+            _state.pending_autodj_skip = True
+            _state.pending_autodj_skip_minute = now.minute
 
 
 async def _fire_due_soft_anchors(  # noqa: PLR0913
@@ -897,8 +999,10 @@ async def _push_cart_to_queue(  # noqa: PLR0913
             references,
         )
         return False
-    fallback_used = bool(cart.id != pos.cart_id) if pos.cart_id else bool(
-        pos.cart_title and cart.title != pos.cart_title
+    fallback_used = (
+        bool(cart.id != pos.cart_id)
+        if pos.cart_id
+        else bool(pos.cart_title and cart.title != pos.cart_title)
     )
     payload = {
         "path": str(sound.path),
@@ -976,80 +1080,6 @@ def _next_available_sound(cart: Cart | None) -> Sound | None:
         return sound
     # Playlist one-shot is exhausted: wrap so clock jingl/pub carts keep filling.
     return cart.next_sound_playlist_loop()
-
-
-async def _pick_music(  # noqa: PLR0913
-    session: ormSession,
-    beets: BeetsIntegration,
-    pos: ClockPosition,
-    now: datetime,
-    extra_artists: set[str] | None = None,
-    extra_titles: set[str] | None = None,
-) -> object | None:
-    category = pos.category
-    queries: list[str] = []
-    if category is not None:
-        queries.append(category.query)
-        if category.empty_query:
-            queries.append(category.empty_query)
-    queries.append("")
-    history = await _music_history(session)
-    forbidden_artists, forbidden_titles = _rule_sets(history, now)
-    if extra_artists:
-        forbidden_artists = forbidden_artists | extra_artists
-    if extra_titles:
-        forbidden_titles = forbidden_titles | extra_titles
-    for query in queries:
-        items = await beets.search(query)
-        picked = _choose_item(items, forbidden_artists, forbidden_titles)
-        if picked is not None:
-            return picked
-    return None
-
-
-def _choose_item(items, forbidden_artists: set[str], forbidden_titles: set[str]):
-    if not items:
-        return None
-    filtered = [
-        item
-        for item in items
-        if str(getattr(item, "artist", "") or "") not in forbidden_artists
-        and str(getattr(item, "title", "") or "") not in forbidden_titles
-    ]
-    pool = filtered or list(items)
-    return choice(pool)
-
-
-async def _music_history(session: ormSession) -> list[MetadataLog]:
-    q = (
-        select(MetadataLog)
-        .where(MetadataLog.cart_id.is_(None))
-        .order_by(MetadataLog.on_air.desc())
-        .limit(max(TITLE_LAST_N, ARTIST_LAST_N) + 5)
-    )
-    return list(await session.scalars(q))
-
-
-def _rule_sets(
-    logs: list[MetadataLog],
-    now: datetime,
-) -> tuple[set[str], set[str]]:
-    naive = now.replace(tzinfo=None) if now.tzinfo else now
-    last_artists = [
-        log.artist for log in logs[:ARTIST_LAST_N] if log.artist
-    ]
-    window_artists = []
-    for log in logs:
-        if not log.artist or log.on_air is None:
-            continue
-        on_air = log.on_air
-        if on_air.tzinfo:
-            on_air = on_air.replace(tzinfo=None)
-        if naive - on_air <= ARTIST_WINDOW:
-            window_artists.append(log.artist)
-    artists = set(last_artists) | set(window_artists)
-    titles = {log.title for log in logs[:TITLE_LAST_N] if log.title}
-    return artists, titles
 
 
 async def _push_autodj_item(

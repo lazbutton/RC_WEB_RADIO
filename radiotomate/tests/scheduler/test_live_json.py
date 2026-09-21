@@ -204,3 +204,46 @@ async def test_push_sound_now_json(  # noqa: PLR0913
     assert ok.status_code == 200
     assert (await ok.get_json())["ok"] is True
     mock.push_sound.assert_awaited_once_with(jingles_cart.id, sound.id)
+
+
+async def test_now_json_conflict_when_harbor(  # noqa: PLR0913
+    raw_app,
+    app_configration: dict,
+    beets_integration: BeetsIntegration,
+    dbsession: ormSession,
+    users_password: str,
+    jingles_cart,
+):
+    user = User(username="live-json-harbor")
+    user.update_password(users_password)
+    user.update_permissions({"can_live": "true"})
+    dbsession.add(user)
+    await dbsession.commit()
+    client = _interface_client(app_configration, beets_integration)
+    await _login(client, "live-json-harbor", users_password)
+    live_mod.set_live_snapshot(
+        {
+            "status": "playing",
+            "source": "stream",
+            "title": "Hop Pop Hop",
+            "artist": "Marie",
+        }
+    )
+    mock = MagicMock()
+    mock.push_cart = AsyncMock()
+    mock.push_sound = AsyncMock()
+    mock.push_path = AsyncMock()
+    try:
+        with patch.object(Scheduler, "get", return_value=mock):
+            cart = await client.post(f"/carts/{jingles_cart.id}/now.json")
+            now = await client.post(
+                "/autodj/conducteur/now.json",
+                json={"path": "/media/x.mp3", "title": "X", "artist": "Y"},
+            )
+    finally:
+        live_mod.set_live_snapshot(None)
+    assert cart.status_code == 409
+    assert (await cart.get_json())["code"] == "harbor_live"
+    assert now.status_code == 409
+    mock.push_cart.assert_not_called()
+    mock.push_path.assert_not_called()

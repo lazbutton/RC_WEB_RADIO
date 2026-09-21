@@ -21,6 +21,11 @@ BIND_ADDRS = ["0.0.0.0"]
 
 BLANK_MAX_DURATION = 1.
 BLANK_THRESHOLD = -45.
+# Music often has a quiet verse or fade longer than 1s at -45 dB; eating that
+# ends the track and jumps to the next Auto-DJ request.
+AUTODJ_BLANK_MAX = 10.
+AUTODJ_BLANK_THRESHOLD = -60.
+CARTS_BLANK_MAX = 10.
 
 ############################ CONFIGURATION LOADING #############################
 
@@ -42,6 +47,7 @@ let yaml.parse (conf:{
     token:string,
     start_sound:string,
     log_path:string?,
+    relay_url:string?,
     outputs: [{
       driver:string,
       device:string?,
@@ -134,9 +140,9 @@ harbor.http.middleware.register(check_token)
 autodj_queue = request.queue(id="autodj_queue")
 
 autodj = blank.eat(id="autodj",
-  start_blank=true,
-  max_blank=BLANK_MAX_DURATION,
-  threshold=BLANK_THRESHOLD,
+  start_blank=false,
+  max_blank=AUTODJ_BLANK_MAX,
+  threshold=AUTODJ_BLANK_THRESHOLD,
   stereo( # If there's a mono file
     autodj_queue
   )
@@ -161,7 +167,11 @@ jingles = blank.eat(id="jingles",
 
 ################################ EXTERNAL RELAY ################################
 
-relay = input.http(id="relay", "https://live.campusgrenoble.org/rcg112",
+# Default URL only seeds the source: the scheduler's RELAY carts pass their own
+# URL through POST /relay (relay.set_url). Configurable via
+# playout_process_config.relay_url; the placeholder is never started by itself.
+RELAY_DEFAULT_URL = conf.playout_process_config.relay_url ?? "http://127.0.0.1:1/relay-not-configured"
+relay = input.http(id="relay", RELAY_DEFAULT_URL,
   start=false, max_buffer=30., self_sync=false)
 
 
@@ -195,7 +205,7 @@ carts_queue = request.queue(id="carts_queue")
 # sometimes recorded shows forget a blank in the end - make it at most 10 seconds
 carts = blank.eat(id="carts",
   start_blank=true,
-  max_blank=BLANK_MAX_DURATION,
+  max_blank=CARTS_BLANK_MAX,
   threshold=BLANK_THRESHOLD,
   stereo( # If there's a mono file
     carts_queue
@@ -204,67 +214,60 @@ carts = blank.eat(id="carts",
 
 ########################### COMBINING SOURCES ##################################
 
-current_programs_source = ref("starting")
 current_source_id = ref("starting")
 
-# a 3-seconds crossfade operator that skips the cutted track.
-# Skipping avoids getting back in the middle of a music track after a cart,
-# but it requires a weird implementation. See https://github.com/savonet/liquidsoap/issues/1548
-# also transitions are currently broken in LS 2.3 :/   https://github.com/savonet/liquidsoap/issues/4179
-def normalize_programs_source(sid)
-  if sid == "carts" or sid == "stream" or sid == "relay" then
+# Heartbeat `/live` must keep exposing stream | relay | carts | jingles | autodj.
+# The inner fallback id is `jingles_then_autodj`; resolve it to the ready child.
+def on_air_source_id(sid)
+  if sid == "jingles_then_autodj" then
+    if source.is_ready(jingles) then "jingles" else "autodj" end
+  elsif sid == "carts" or sid == "stream" or sid == "relay" or sid == "jingles" then
     sid
   else
     "autodj"
   end
 end
 
+# Transitions are currently broken in LS 2.3 :/   https://github.com/savonet/liquidsoap/issues/4179
 def crossfade_3s(a,b)
-  # faded = add(normalize=false, [
-  #   fade.in(duration=3., type="exp", b),
-  #   amplify(mkfade(duration=3., start=1., stop=0., type="exp", a) ,a)
-  # ])
-  # thread.run(delay=10., { source.skip(a) })
-
-  current_programs_source := normalize_programs_source(source.id(b))
-  current_source_id := current_programs_source()
+  current_source_id := on_air_source_id(source.id(b))
 
   # if an input stream is on air, stop downloading from the relay
   if current_source_id() == "stream" then
     relay.stop()
   end
 
-  # faded
   b
 end
-
-
-# The final `blank()` is only here so Liquidsoap will consider `programs` as a safe source.
-programs = fallback([stream,   relay,     carts,        autodj,        blank()],
-  transitions=[crossfade_3s, crossfade_3s, crossfade_3s, crossfade_3s, crossfade_3s],
-  track_sensitive=false,
-  replay_metadata=true,
-  id="programs")
 
 def mark_jingles_on_air(_, b)
   current_source_id := "jingles"
   b
 end
 
-def mark_programs_on_air(_, b)
-  current_source_id := normalize_programs_source(current_programs_source())
+def mark_autodj_on_air(_, b)
+  current_source_id := "autodj"
   b
 end
 
-programs_and_jingles = fallback([jingles, programs],
-  transitions=[mark_jingles_on_air, mark_programs_on_air],
-  id="programs_and_jingles",
-  replay_metadata=true
-)
+# Jingles still cut Auto-DJ, never live / relay / a cart already on air.
+jingles_then_autodj = fallback([jingles, autodj],
+  transitions=[mark_jingles_on_air, mark_autodj_on_air],
+  track_sensitive=false,
+  replay_metadata=true,
+  id="jingles_then_autodj")
+
+# Live takes the antenna as soon as the harbor buffer is ready.
+# The final `blank()` keeps `programs` a safe source.
+programs = fallback([stream, relay, carts, jingles_then_autodj, blank()],
+  transitions=[crossfade_3s, crossfade_3s, crossfade_3s, crossfade_3s, crossfade_3s],
+  track_sensitive=false,
+  replay_metadata=true,
+  id="programs")
 
 
 settings.lufs.integrated_metadata := "rg_track_gain"
-bed = normalize_track_gain(programs_and_jingles)
+bed = normalize_track_gain(programs)
 
 def post_to_log(md)
   log(label="replaygain", md["rg_track_gain"])
@@ -302,7 +305,7 @@ def track_remaining() =
     finite_seconds(relay.remaining())
   else
     r = finite_seconds(autodj.remaining())
-    if r > 0. then r else finite_seconds(programs_and_jingles.remaining()) end
+    if r > 0. then r else finite_seconds(programs.remaining()) end
   end
 end
 
@@ -538,6 +541,8 @@ log.important("started #{outputs_nb} outputs")
 
 # raw metadata can weight a few megabytes so we'll filter_md only once
 current_md = ref(json())
+on_air_title = ref("")
+on_air_artist = ref("")
 
 # keep a pre-computed version of queued requests' metadata
 next_jingle = ref({title="", artist="", rid=-1, initial_uri="", duration=0.})
@@ -556,7 +561,14 @@ def post_to_log(md)
   data = filter_md(md)
   data.add("on_air", time.string('%Y-%m-%d %H:%M:%S'))
   current_md := data
-  data.add("source", current_source_id())
+  on_air_title := md["title"]
+  on_air_artist := md["artist"]
+  # As-run truth: a request pushed by the scheduler carries the queue it came
+  # from (annotate radiotomate_queue). Transitions in LS 2.3 are unreliable
+  # (#4179), so `current_source_id` alone mislabelled carts music as autodj.
+  pushed_queue = md["radiotomate_queue"]
+  src = if pushed_queue != "" then pushed_queue else current_source_id() end
+  data.add("source", src)
   _ = post_to_radiotomate("/metadata_log", data)
 end
 
@@ -589,30 +601,38 @@ def fill_next(data, field, q, cached)
   cached = true ? cached : ref({title="", artist="", rid=-1, initial_uri="", duration=0.}) # FIXME this is a workaround while waiting for https://github.com/savonet/liquidsoap/issues/4285
   try
     current_maybe = q.current()
-    r = if null.defined(current_maybe) then
-      # this request is playing, or ready to play but its queue is not activated yet.
-      null.get(current_maybe)
+    playing_id = if null.defined(current_maybe) then request.id(null.get(current_maybe)) else -1 end
+    current_status = if null.defined(current_maybe) then request.status(null.get(current_maybe)) else "" end
+    # current() est le vrai suivant seulement si la file n'est pas à l'antenne (ready).
+    # Sinon c'est le titre en cours : on lit la file, jamais un RID playing.
+    r = if current_status == "ready" then
+      begin
+        cur = null.get(current_maybe)
+        md = request.metadata(cur)
+        # Prêt mais déjà à l'antenne (même fichier poussé dans deux files) : chercher derrière.
+        if md["title"] == on_air_title() and md["artist"] == on_air_artist() then
+          list.find(fun (cand) -> request.status(cand) == "ready" and request.id(cand) != request.id(cur), q.queue())
+        else
+          cur
+        end
+      end
     else
-      list.find(fun (r) -> request.status(r) != "playing", q.queue())
+      list.find(fun (cand) -> request.status(cand) == "ready" and request.id(cand) != playing_id, q.queue())
     end
-    status = request.status(r)
     rid = request.id(r)
 
     if rid == cached().rid then
       log.debug("#{field} return cached RID#{rid}, #{q.length()} items enqueued")
       data.add(field, cached())
-    elsif status == "ready" then
+    else
       md = request.metadata(r)
       cached := {title=md["title"], artist=md["artist"], rid=rid, initial_uri=request.uri(r), duration=cue_duration(r)}
       log.debug("#{field} update cache with RID#{rid}, #{q.length()} items enqueued")
       data.add(field, cached())
-    else
-      log.debug("#{field} unexpected case for RID#{rid}, #{q.length()} items enqueued")
-      data.add(field, {title="", artist="", rid=rid, initial_uri=request.uri(r), duration=0.})
     end
 
   catch err : [error.not_found] do
-    # when queue is empty
+    cached := {title="", artist="", rid=-1, initial_uri="", duration=0.}
     log.debug("#{field} is empty")
     data.add(field, {rid=-1})
     ignore(err)
@@ -722,6 +742,7 @@ harbor.http.register(port=API_PORT, method="POST", "/voiceover", voiceover_POST)
 
 def live_DELETE(req, res) =
   radiotomate_sound_id = req.query["radiotomate_sound_id"]
+  queue_name = req.query["queue"]
   if string.length(req.query["relay"]) > 0 then
     relay.stop()
     res.status_code(200)
@@ -740,6 +761,22 @@ def live_DELETE(req, res) =
           carts_queue.skip()
           res.status_code(200)
       end
+    end
+  elsif string.length(queue_name) > 0 then
+    # Hard-sync: drop the cut Auto-DJ track without skipping the output bed
+    # (bed.skip would start the next Auto-DJ request before the cart is ready).
+    if queue_name == "autodj" then
+      autodj_queue.skip()
+      log("Skipping autodj queue")
+      res.status_code(200)
+    elsif queue_name == "jingles" then
+      jingles_queue.skip()
+      res.status_code(200)
+    elsif queue_name == "carts" then
+      carts_queue.skip()
+      res.status_code(200)
+    else
+      res.status_code(400)
     end
   else
     bed.skip()
@@ -762,7 +799,7 @@ def queue_POST(req, res) =
   }) = req.body()
 
   pushed = time()
-  annotated = "annotate:pushed=\"#{pushed}\"" ^
+  annotated = "annotate:pushed=\"#{pushed}\",radiotomate_queue=\"#{queue_name}\"" ^
     if null.defined(posted.radiotomate_sound_id) then
       ",radiotomate_sound_id=\"#{null.get(posted.radiotomate_sound_id)}\""
     else
@@ -908,12 +945,38 @@ def _queue_flush_result(q)
 end
 
 
-def queue_flush_POST(_, res) =
+ALL_QUEUES = ["autodj", "jingles", "carts"]
+
+# Body is optional: `{}` / empty → flush everything; `{"queues": ["jingles",
+# "autodj"]}` → only those (harbor return keeps the carts stock).
+def _flush_wanted(body)
+  if string.trim(body) == "" then
+    ALL_QUEUES
+  else
+    try
+      let json.parse (posted : {queues: [string]?}) = body
+      posted.queues ?? ALL_QUEUES
+    catch _ do
+      log(label="queue_flush", level=3, "unreadable body, flushing all queues")
+      ALL_QUEUES
+    end
+  end
+end
+
+def queue_flush_POST(req, res) =
+  wanted = _flush_wanted(req.body())
+  def maybe(name, q)
+    if list.mem(name, wanted) then
+      _queue_flush_result(q)
+    else
+      {removed=0, kept=q.length()}
+    end
+  end
   res.status_code(200)
   res.json({
-    autodj=_queue_flush_result(autodj_queue),
-    jingles=_queue_flush_result(jingles_queue),
-    carts=_queue_flush_result(carts_queue)
+    autodj=maybe("autodj", autodj_queue),
+    jingles=maybe("jingles", jingles_queue),
+    carts=maybe("carts", carts_queue)
   })
 end
 

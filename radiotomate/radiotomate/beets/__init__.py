@@ -139,19 +139,22 @@ class BeetsIntegration:
                     "Queue'd %d sounds catching up their replaygain analysis", len(ids)
                 )
 
-        sound_id = None
+        job = None
         while True:
             try:
-                sound_id = await self.analyzer_q.get()
+                job = await self.analyzer_q.get()
+                if isinstance(job, tuple) and job and job[0] == "beets":
+                    await self.ensure_item_gain(int(job[1]))
+                    continue
                 async with db.session() as dbsession:
-                    sound = await Sound.from_id(dbsession, sound_id)
+                    sound = await Sound.from_id(dbsession, job)
                     if sound:
                         await self._do_analyze_rg(sound)
                         await dbsession.commit()
             except CancelledError:
                 return
             except Exception:
-                _log.exception("while attempting sound_id=%r", sound_id)
+                _log.exception("while attempting analysis job=%r", job)
 
     async def _do_analyze_rg(self, sound: Sound):
         """
@@ -161,8 +164,48 @@ class BeetsIntegration:
         loop = get_running_loop()
         await loop.run_in_executor(None, self.rg.handle_track, proxied, False)
 
+    async def _do_analyze_item(self, item: Item):
+        """
+        Fill ReplayGain fields on a library Item (stored in the Beets DB, not the tags).
+        """
+        loop = get_running_loop()
+        await loop.run_in_executor(None, self.rg.handle_track, item, False)
+
+    async def get_item(self, beets_id: int) -> Item | None:
+        loop = get_running_loop()
+        return await loop.run_in_executor(None, self.lib.get_item, beets_id)
+
+    async def ensure_item_gain(self, beets_id: int) -> str | None:
+        """
+        Return the ReplayGain track gain of a library Item, analysing it on the spot
+        when the Beets import did not compute it (no ``replaygain`` plugin, old
+        import…). Returns ``None`` when the item is unknown or the analysis failed.
+        """
+        item = await self.get_item(beets_id)
+        if item is None:
+            return None
+        gain = item.get("rg_track_gain")
+        if gain is None:
+            try:
+                await self._do_analyze_item(item)
+            except Exception:
+                _log.exception("ReplayGain analysis failed for beets item %s", beets_id)
+                return None
+            gain = item.get("rg_track_gain")
+            if gain is None:
+                return None
+            _log.info("Computed ReplayGain %.2f dB for beets item %s", gain, beets_id)
+        return str(gain)
+
     async def analyze_soon(self, sound_id: int):
         """
         Add a sound to the replaygain analysis queue
         """
         await self.analyzer_q.put(sound_id)
+
+    def analyze_item_soon(self, beets_id: int) -> None:
+        """
+        Queue a Beets library Item for ReplayGain analysis (used when the forecast
+        picks a track that has no gain yet, so it is ready by the time it is pushed).
+        """
+        self.analyzer_q.put_nowait(("beets", int(beets_id)))

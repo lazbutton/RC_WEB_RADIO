@@ -71,3 +71,25 @@ async def test_flush_queues_records_removed_counts(raw_app: CustomQuart):
     snapshot = runtime_metrics.snapshot()["queue_clean_removed_total"]
     assert snapshot["autodj"] == 3
     assert snapshot["jingles"] == 12
+
+
+async def test_flush_queues_targets_named_queues(raw_app: CustomQuart):
+    response = httpx.Response(
+        200,
+        json={
+            "jingles": {"removed": 4, "kept": 0},
+            "autodj": {"removed": 1, "kept": 0},
+        },
+    )
+    with patch.object(
+        PlayoutGateway,
+        "_call",
+        new=AsyncMock(return_value=response),
+    ) as mocked:
+        async with raw_app.test_app():
+            gateway = PlayoutGateway(raw_app.config["PLAYOUT_CLIENT"])
+            result = await gateway.flush_queues(["jingles", "autodj"])
+    assert result.ok is True
+    assert mocked.await_args.args[0] == "POST"
+    assert mocked.await_args.args[1] == "/queue/flush"
+    assert mocked.await_args.kwargs["json"] == {"queues": ["jingles", "autodj"]}

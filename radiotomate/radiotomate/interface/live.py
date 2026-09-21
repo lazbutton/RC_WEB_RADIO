@@ -37,6 +37,19 @@ def get_live_snapshot() -> dict:
     return cached
 
 
+def harbor_is_live(snapshot: dict | None = None) -> bool:
+    payload = snapshot if snapshot is not None else get_live_snapshot()
+    if str(payload.get("status") or "") == "offline":
+        return False
+    from radiotomate.domain.emission import is_harbor_source
+
+    return is_harbor_source(payload.get("source"))
+
+
+def harbor_busy_response():
+    return jsonify({"error": "Direct à l'antenne.", "code": "harbor_live"}), 409
+
+
 def _float_field(value: object, default: float = 0.0) -> float:
     try:
         number = float(value if value is not None else default)

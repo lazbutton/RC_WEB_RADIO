@@ -1,4 +1,5 @@
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -7,11 +8,18 @@ from sqlalchemy.orm import Session as ormSession
 
 from radiotomate.beets import BeetsIntegration
 from radiotomate.enums import CartMode, ScheduleMode
-from radiotomate.models import AutoDJSlot, Clock, ClockPosition, MusicCategory
+from radiotomate.models import (
+    AutoDJSlot,
+    Clock,
+    ClockPosition,
+    MetadataLog,
+    MusicCategory,
+)
 from radiotomate.models.cart import Cart
 from radiotomate.models.sound import Sound
 from radiotomate.scheduler.clock import (
     PARIS,
+    _choose_item,
     anchor_in_daypart,
     can_push_sequential_jingle,
     next_hard_anchor_minute,
@@ -48,12 +56,26 @@ def _live(time: str, **queues) -> dict:
 
 
 def test_can_push_sequential_jingle_gates_source_remaining_and_autodj():
-    assert can_push_sequential_jingle(_live(NIGHT, remaining="2", autodj_queued=0)) is True
-    assert can_push_sequential_jingle(_live(NIGHT, remaining="2", autodj_queued=1)) is False
-    assert can_push_sequential_jingle(_live(NIGHT, remaining="180", autodj_queued=0)) is False
+    assert (
+        can_push_sequential_jingle(_live(NIGHT, remaining="2", autodj_queued=0)) is True
+    )
+    assert (
+        can_push_sequential_jingle(_live(NIGHT, remaining="2", autodj_queued=1))
+        is False
+    )
+    assert (
+        can_push_sequential_jingle(_live(NIGHT, remaining="180", autodj_queued=0))
+        is False
+    )
     assert (
         can_push_sequential_jingle(
             _live(NIGHT, source="jingles", remaining="0.2", autodj_queued=0)
+        )
+        is False
+    )
+    assert (
+        can_push_sequential_jingle(
+            _live(NIGHT, source="stream", remaining="0.2", autodj_queued=0)
         )
         is False
     )
@@ -241,7 +263,9 @@ async def test_does_not_chain_jingles_when_current_jingle_ends(
         beets_integration,
     )
     assert "jingle" not in actions
-    assert all(not str(c.args[0]).endswith("/jingles") for c in client.post.call_args_list)
+    assert all(
+        not str(c.args[0]).endswith("/jingles") for c in client.post.call_args_list
+    )
 
 
 async def test_tick_does_not_jump_ahead_to_later_jingle(
@@ -279,7 +303,9 @@ async def test_tick_does_not_jump_ahead_to_later_jingle(
         beets_integration,
     )
     assert "jingle" not in actions
-    assert all(not str(c.args[0]).endswith("/jingles") for c in client.post.call_args_list)
+    assert all(
+        not str(c.args[0]).endswith("/jingles") for c in client.post.call_args_list
+    )
 
 
 async def test_autodj_fills_while_cart_is_on_air(
@@ -325,12 +351,119 @@ async def test_pub_at_1020_in_daypart(
     )
     actions = await tick(dbsession, live, client, beets_integration)
     assert "anchor:20" in actions
-    assert "skip" in actions
+    assert "skip" not in actions
+    client.delete.assert_not_called()
     payload = client.post.call_args.kwargs["json"]
     assert client.post.call_args.args[0] == "/queue/carts"
     assert payload["artist"] == "Pubs"
     assert payload["title"] == "Spot test"
     assert payload["path"].endswith("spot.mp3")
+
+
+async def test_hard_sync_skips_autodj_queue_after_cart_on_air(
+    dbsession: ormSession,
+    jingles_cart: Cart,
+    pubs_cart: Cart,
+    beets_integration: BeetsIntegration,
+):
+    client = _client()
+    live = _live(
+        JOURNEE_20,
+        source="autodj",
+        artist="Loop Band",
+        title="Loop Song",
+        remaining="180",
+        next_jingle={"rid": 1},
+        next_autodj={"rid": 1},
+        jingles_queued=2,
+        autodj_queued=3,
+    )
+    first = await tick(dbsession, live, client, beets_integration)
+    assert "anchor:20" in first
+    assert "skip" not in first
+    client.delete.assert_not_called()
+    logs = await MetadataLog.get(dbsession, limit=8)
+    assert any(
+        row.title == "Loop Song"
+        and row.artist == "Loop Band"
+        and row.extra.get("skipped")
+        for row in logs
+    )
+
+    later = _live(
+        JOURNEE_20,
+        source="carts",
+        remaining="12",
+        next_jingle={"rid": -1},
+        next_autodj={"rid": 1},
+        next_cart={"rid": 1},
+        jingles_queued=0,
+        autodj_queued=1,
+        carts_queued=1,
+    )
+    client2 = _client()
+    second = await tick(dbsession, later, client2, beets_integration)
+    assert "skip" in second
+    assert "anchor:20" not in second
+    client2.delete.assert_called_once()
+    called = client2.delete.call_args
+    assert called.args[0] == "/live"
+    assert called.kwargs.get("params") == {"queue": "autodj"}
+
+
+def test_choose_item_keeps_forbidden_out_when_alternatives_exist():
+    items = [
+        SimpleNamespace(artist="A", title="T1"),
+        SimpleNamespace(artist="B", title="T2"),
+    ]
+    picked = {_choose_item(items, {"A"}, {"T1"}).title for _ in range(20)}
+    assert picked == {"T2"}
+
+
+def test_choose_item_prefers_other_title_when_all_artists_are_forbidden():
+    items = [
+        SimpleNamespace(artist="A", title="T1"),
+        SimpleNamespace(artist="A", title="T2"),
+    ]
+    picked = _choose_item(items, {"A"}, {"T1"})
+    assert picked is not None
+    assert picked.title == "T2"
+
+
+def test_choose_item_repeats_only_when_everything_is_forbidden():
+    items = [SimpleNamespace(artist="A", title="T1")]
+    picked = _choose_item(items, {"A"}, {"T1"})
+    assert picked is not None
+    assert picked.title == "T1"
+
+
+async def test_tick_holds_on_harbor_stream(
+    dbsession: ormSession,
+    jingles_cart: Cart,
+    pubs_cart: Cart,
+    beets_integration: BeetsIntegration,
+):
+    client = _client()
+    actions = await tick(
+        dbsession,
+        _live(
+            JOURNEE_20,
+            source="stream",
+            remaining="180",
+            next_jingle={"rid": -1},
+            next_autodj={"rid": -1},
+            jingles_queued=0,
+            autodj_queued=0,
+        ),
+        client,
+        beets_integration,
+    )
+    assert "live_hold" in actions
+    assert "skip" not in actions
+    assert "jingle" not in actions
+    assert "autodj" not in actions
+    client.post.assert_not_called()
+    client.delete.assert_not_called()
 
 
 async def test_no_pub_when_daypart_too_short(

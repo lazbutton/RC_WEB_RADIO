@@ -103,7 +103,8 @@ async def test_studio_json_authenticated(  # noqa: PLR0913
     jingles = next(c for c in carts["carts"] if c["title"] == "Jingles")
     assert jingles["sounds"]
     assert "path" not in jingles
-    assert "path" not in jingles["sounds"][0]
+    # Console needs the bank-relative path for the pads, never a server path.
+    assert not jingles["sounds"][0]["path"].startswith("/")
 
 
 async def test_autodj_beets_file_requires_login(

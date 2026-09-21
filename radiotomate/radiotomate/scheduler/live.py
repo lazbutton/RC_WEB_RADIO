@@ -20,7 +20,9 @@ from werkzeug.exceptions import BadRequest
 from radiotomate.auth import token_required
 from radiotomate.beets import BeetsIntegration
 from radiotomate.db import QuartAlchemy
+from radiotomate.domain.emission import is_harbor_source
 from radiotomate.quart import ShutdownError, or_shutdown
+from radiotomate.scheduler.clock import overlay_rundown_next, source_id
 from radiotomate.scheduler.clock import tick as clock_tick
 from radiotomate.scheduler.metrics import runtime_metrics
 
@@ -31,6 +33,7 @@ _flag_sequencer_running = Lock()
 _next_sig_lock = Lock()
 _last_next_sig: tuple | None = None
 _last_clock_at = 0.0
+_playout_source_state: dict[str, str | None] = {"last": None}
 
 _log = logging.getLogger(__name__)
 
@@ -65,6 +68,9 @@ def _parse_cue(value: object) -> dict | None:
         duration = 0.0
     if duration > 0:
         cue["duration"] = duration
+    sound_id = str(parsed.get("radiotomate_sound_id") or "").strip()
+    if sound_id:
+        cue["radiotomate_sound_id"] = sound_id
     return cue
 
 
@@ -118,6 +124,13 @@ async def _relay_next_if_changed(live_data: dict) -> None:
     targets = current_app.config.get("RELAY_METADATA_TO") or []
     if not targets:
         return
+    live_data = dict(live_data)
+    try:
+        db = QuartAlchemy.get()
+        async with db.session() as session:
+            await overlay_rundown_next(session, live_data)
+    except Exception:
+        _log.warning("rundown next peek failed", exc_info=True)
     sig = (
         _cue_sig(live_data.get("next_autodj")),
         _cue_sig(live_data.get("next_jingle")),
@@ -201,12 +214,95 @@ async def _run_sequencer(live_data: dict):
         runtime_metrics.tick_duration_seconds = perf_counter() - started
 
 
+def reset_playout_source_memory() -> None:
+    _playout_source_state["last"] = None
+
+
+async def _on_playout_source(live_data: dict) -> None:
+    """On harbor disconnect: flush jingles + autodj, skip leftover autodj."""
+    source = str(live_data.get("source") or "")
+    previous = _playout_source_state["last"]
+    _playout_source_state["last"] = source
+    if not is_harbor_source(previous) or is_harbor_source(source):
+        return
+    from radiotomate.scheduler.playout import gateway_for
+
+    gateway = gateway_for(current_app.config["PLAYOUT_CLIENT"])
+    result = await gateway.flush_queues(["jingles", "autodj"])
+    if not result.ok:
+        _log.error("Harbor return flush failed: %s", result.error)
+    if source_id(live_data) in {"autodj", "jingles"}:
+        skipped = await gateway.skip()
+        if not skipped.ok:
+            _log.error("Harbor return skip failed: %s", skipped.error)
+    _log.info("Harbor ended (%s → %s): flushed jingles+autodj", previous, source)
+
+
+# Liquidsoap beats at 1 Hz; the clock only needs to think when something
+# changed (source, title, queue depths, minute) or near the end of a track.
+TICK_HOT_REMAINING_SECONDS = 10.0
+TICK_MAX_IDLE_SECONDS = 5.0
+_tick_gate: dict = {"signature": None, "last_run": 0.0}
+
+
+def reset_tick_gate() -> None:
+    _tick_gate["signature"] = None
+    _tick_gate["last_run"] = 0.0
+
+
+def _rid(value) -> int:
+    if isinstance(value, dict):
+        try:
+            return int(value.get("rid", -1))
+        except (TypeError, ValueError):
+            return -1
+    return -1
+
+
+def tick_signature(live_data: dict) -> tuple:
+    return (
+        str(live_data.get("source") or ""),
+        str(live_data.get("artist") or ""),
+        str(live_data.get("title") or ""),
+        _rid(live_data.get("next_jingle")),
+        _rid(live_data.get("next_autodj")),
+        _rid(live_data.get("next_cart")),
+        str(live_data.get("jingles_queued") or ""),
+        str(live_data.get("autodj_queued") or ""),
+        str(live_data.get("carts_queued") or ""),
+        str(live_data.get("time") or "")[:16],  # minute boundary → anchors
+    )
+
+
+def should_run_tick(live_data: dict, *, now: float | None = None) -> bool:
+    """Skip the heavy tick when the antenna state is unchanged mid-track."""
+    now = perf_counter() if now is None else now
+    try:
+        remaining = float(live_data.get("remaining") or 0.0)
+    except (TypeError, ValueError):
+        remaining = 0.0
+    signature = tick_signature(live_data)
+    hot = remaining <= TICK_HOT_REMAINING_SECONDS
+    changed = signature != _tick_gate["signature"]
+    idle = now - _tick_gate["last_run"] >= TICK_MAX_IDLE_SECONDS
+    if hot or changed or idle:
+        _tick_gate["signature"] = signature
+        _tick_gate["last_run"] = now
+        return True
+    runtime_metrics.tick_gated_total += 1
+    return False
+
+
 async def _check_queues(data):
     live_data = json.loads(data)
+    await _on_playout_source(live_data)
     current_app.add_background_task(_relay_next_if_changed, live_data)
     if _flag_sequencer_running.locked():
         runtime_metrics.tick_skipped_total += 1
         return
+    if not should_run_tick(live_data):
+        return
+    runtime_metrics.tick_run_total += 1
     current_app.add_background_task(_run_sequencer, live_data)
 
 

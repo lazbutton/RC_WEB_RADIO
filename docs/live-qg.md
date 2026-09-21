@@ -50,6 +50,23 @@ output.icecast(
 
 Prérequis Pi : alim 5,1 V saine (`vcgencmd get_throttled` → `0x0`), iD14 sur **son** secteur, dissipateur. Sans ça : xruns et drop live.
 
+## Voiceover micro Hub (ducking) — ce qui existe dans le `.liq`
+
+Distinct du harbor : le micro du Hub ne *prend* pas l’antenne, il **parle par-dessus** le bed (auto-DJ / carts / jingles), jamais par-dessus un direct harbor.
+
+- Entrée : PCM brut poussé en TCP sur `:6802` (`input.ffmpeg` en écoute, `voiceover_pcm`), mixé au bed (`add`), pas de fichier.
+- Ducking : `POST /voiceover {"on": true, "fade": 1.2}` sur l’API playout (`:6833`, token) → le bed descend à **0,18** (≈ −15 dB) en `fade` s ; `{"on": false}` remonte. `GET /voiceover` renvoie `on`, `gain`, `fade`, `remaining`.
+- Garde-fous côté Liquidsoap : refus (409) si la source est `stream` (direct), et **retour automatique** du niveau quand il reste ≤ 15 s au titre (`VOICEOVER_RESTORE_S`) pour ne pas ducker l’enchaînement.
+- Le Hub y accède via nowplaying (`/probe/voiceover`, `/probe/voiceover/pcm` dans `button/hub/nginx.conf`) ; le playout n’est jamais exposé.
+
+Recette : titre en cours → `on` → niveau bed −15 dB en ~1 s, micro audible → `off` → retour ; lancer un direct harbor pendant `on` → le bed ne ducke plus (la priorité live gagne).
+
+## État réel (sept. 2026)
+
+- Playout : **Liquidsoap 2.4.5** sur Nasgul. Le commentaire « transitions cassées LS 2.3 (#4179) » dans le `.liq` date de 2.3 : `crossfade_3s` ne fait **aucun** fondu (il ne fait que noter la source à l’antenne). À re-tester sur banc avant d’activer un vrai `cross` ; les jingles coupent net (« ducking jingles » = chantier E).
+- Harbor : recette BUTT **pas encore faite** contre Nasgul (`192.168.1.100:6800` ou Tailscale). Le retour de direct vide `jingles` + `autodj` et laisse la file `carts`.
+- EF-01 (créneau live sans encodeur) : aucun filet déclaré ; l’auto-DJ reprend simplement. À trancher éditorialement avant de coder.
+
 ## Recette
 
 1. Auto-DJ en cours sur le player public.

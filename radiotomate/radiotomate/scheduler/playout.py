@@ -65,6 +65,10 @@ class PlayoutGateway:
     async def version(self) -> PlayoutResult:
         return await self._request("GET", "/version")
 
+    async def health(self) -> PlayoutResult:
+        """Liquidsoap `/health`: silence_s, rms_db, source, cpu_pct, rss_mb…"""
+        return await self._request("GET", "/health")
+
     async def clean_queues(self, max_age_seconds: float) -> PlayoutResult:
         result = await self._request(
             "POST",
@@ -74,8 +78,9 @@ class PlayoutGateway:
         self._record_queue_removals(result)
         return result
 
-    async def flush_queues(self) -> PlayoutResult:
-        result = await self._request("POST", "/queue/flush")
+    async def flush_queues(self, queues: list[str] | None = None) -> PlayoutResult:
+        payload = {"queues": list(queues)} if queues else None
+        result = await self._request("POST", "/queue/flush", json=payload)
         self._record_queue_removals(result)
         return result
 

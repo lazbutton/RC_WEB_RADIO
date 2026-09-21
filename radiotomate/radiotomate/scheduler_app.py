@@ -22,13 +22,16 @@ from radiotomate.beets import BeetsIntegration
 from radiotomate.db import PathLike, QuartAlchemy
 from radiotomate.quart import CustomQuart, ShutdownError
 from radiotomate.scheduler import (
+    alerts,
     analyzer,
     bank_sync,
     harbor,
     health,
     live,
     metadata_log,
+    metrics,
     queue_cleaner,
+    retention,
     schedule,
     version,
 )
@@ -118,6 +121,25 @@ def app_factory(config: dict, beets: BeetsIntegration) -> CustomQuart:
                 "interval_seconds",
                 60,
             ),
+            "RETENTION_ENABLED": bool(
+                config.get("retention", {}).get("enabled", True)
+            ),
+            "RETENTION_INTERVAL": config.get("retention", {}).get(
+                "interval_seconds", 3600
+            ),
+            "RETENTION_RUNDOWN_DAYS": config.get("retention", {}).get(
+                "rundown_days", 7
+            ),
+            "RETENTION_COMMANDS_HOURS": config.get("retention", {}).get(
+                "commands_hours", 24
+            ),
+            "RETENTION_METADATA_DAYS": config.get("retention", {}).get(
+                "metadata_days", 90
+            ),
+            "METRICS_SNAPSHOT_INTERVAL": config.get("metrics", {}).get(
+                "snapshot_interval_seconds", 30
+            ),
+            "ALERTS": config.get("alerts", {}) or {},
         },
     )
     app.register_error_handler(Exception, errors_as_text)
@@ -144,6 +166,10 @@ def app_factory(config: dict, beets: BeetsIntegration) -> CustomQuart:
         if app.config.get("QUEUE_CLEAN_ENABLED", True):
             app.add_background_task(queue_cleaner.loop, app)
         app.add_background_task(bank_sync.loop, app)
+        if app.config.get("RETENTION_ENABLED", True):
+            app.add_background_task(retention.loop, app)
+        app.add_background_task(metrics.snapshot_loop, app)
+        app.add_background_task(alerts.loop, app)
 
     auth_manager = QuartAuth()
     auth_manager.user_class = RadiotomateAuth

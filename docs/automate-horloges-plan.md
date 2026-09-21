@@ -2,13 +2,17 @@
 
 **Quoi faire, dans quel ordre.** Spec : [`automate-horloges.md`](automate-horloges.md).
 
-Deux pistes distinctes. Le proto **informe** la phase 0 ; il ne la **signe** pas et ne tient pas les phases moteur.
+> **État réel — septembre 2026.** Le moteur est **codé et en prod sur Nasgul** : motif séquentiel, ancres dures / souples, conducteur persisté (`RundownItem`), outbox idempotente, reprise curseur / ancres, `live_hold` harbor. DB prod : 2 horloges (« 24/24 Rotation habillée », « Journée pubs » ancres :20 / :40), 21 dayparts. Les statuts « pas commencé » ci-dessous sont l’historique du plan ; le tableau suivant fait foi.
 
-| Piste | Statut | Livrable réel |
+| Piste | Statut réel | Détail |
 |---|---|---|
-| **Proto console** (`console/`, ADR-H7) | En cours, démo | Pupitre `/antenne` + maquettes horloges / semaine / carts. Catalogue mock, pas d’audio, pas d’API. |
-| **Phase 0 éditorial** | Non signé | Les horloges mock Journée / Soir sont une **proposition d’écran**, pas les positions / secours / dayparts remplis. |
-| **Phases 1–5 moteur** | Pas commencées | Rien dans `radiotomate/` ni Liquidsoap. Le proto ne compte pas pour « le motif tourne » ni « à :20 la pub part ». |
+| **Phase 0 éditorial** | Partiel | Horloges et dayparts saisis pour le banc ; **banque `10-rotation` vide**, donc l’auto-DJ ne tourne que sur le cart Mimi. Le vrai « qui passe quoi » reste à remplir. |
+| **Phase 1 motif** | En prod | `clock.py` (+ `timing.py`, `music_rules.py`), tests `test_clock.py`. |
+| **Phase 2 ancres / sync** | En prod | Ancres dures coupent, souples attendent la fin du titre, `live_hold` pendant un direct. |
+| **Phase 3 conducteur** | En prod | `execution.py` (prévision, réconciliation as-run), `desk.py` (pupitre), API `/rundown`. Source as-run fiabilisée par l’annotation `radiotomate_queue`. |
+| **Phase 4 bascule** | En cours | Mode cart `CLOCK` (défaut) : plus de cron APScheduler pour les carts que l’horloge gère (migration v13 pour les crons par défaut `* :00`). Reste : carts `TIMED` volontaires et `max_duration` encore sur APScheduler 4 alpha. |
+| **Phase 5 recette** | À faire | Playout Linux = Nasgul (Liquidsoap 2.4.5). Critères §12 à cocher avec une banque réelle. |
+| **Proto console** | Livré, branché | La console React `:30126` parle à l’API réelle (plus de mock). |
 
 Moteur antenne (live / relais / filets QG) : [`automate-plan.md`](automate-plan.md), **en pause**.
 

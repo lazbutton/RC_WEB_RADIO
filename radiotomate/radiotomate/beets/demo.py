@@ -208,3 +208,8 @@ class BeetsMockIntegration(BeetsIntegration):
     async def _do_analyze_rg(self, sound: Sound):
         sound.gain = -1.0
         sound.peak = -1.0
+
+    async def _do_analyze_item(self, item):
+        item.rg_track_gain = -1.0
+        item.rg_track_peak = -1.0
+        item.store()

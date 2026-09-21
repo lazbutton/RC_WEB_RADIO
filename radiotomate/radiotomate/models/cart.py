@@ -220,6 +220,8 @@ class Cart(Base):
         Compact next-occurrence label for the carts table.
         Simple timed carts: ``Mer. 14:03``. Advanced: next fire time or condensed cron.
         """
+        if self.schedule_mode is ScheduleMode.CLOCK:
+            return "Horloge"
         if self.schedule_mode is ScheduleMode.JINGLES:
             base = "Jingles"
         elif not self.schedule_is_advanced:

@@ -7,9 +7,11 @@ import logging
 
 from sqlalchemy import select
 
+from radiotomate.enums import CartMode
 from radiotomate.models import Cart, User
 from radiotomate.quart import ShutdownError, or_shutdown
-from radiotomate.services.carts import sync_bank_folder
+from radiotomate.services.carts import forget_legacy_files, reconcile_cart_bank
+from radiotomate.services.media_bank import media_writable
 
 _log = logging.getLogger(__name__)
 
@@ -38,33 +40,28 @@ async def first_admin_id(session) -> int | None:
 
 
 async def run_sync(app) -> dict:
+    if not media_writable():
+        return {"ok": True, "added": 0, "reason": "no_media"}
     db = app.extensions["sqlalchemy"]
     added_ids: list[int] = []
+    stale_all: list = []
     async with db.session() as session:
         uploader_id = await first_admin_id(session)
         if uploader_id is None:
             return {"ok": True, "added": 0, "reason": "no_user"}
-        carts = list(
-            (
-                await session.scalars(
-                    select(Cart).where(
-                        Cart.bank_folder.is_not(None),
-                        Cart.bank_folder != "",
-                    )
-                )
-            ).all()
-        )
+        carts = list((await session.scalars(select(Cart))).all())
         for cart in carts:
-            if not str(cart.bank_folder or "").strip():
+            if cart.mode is CartMode.RELAY:
                 continue
             try:
-                added = await sync_bank_folder(session, cart, uploader_id)
+                added, stale = await reconcile_cart_bank(session, cart, uploader_id)
             except Exception:
                 _log.exception("bank sync failed for cart %s", cart.id)
                 continue
             added_ids.extend(sound.id for sound in added)
-        if added_ids:
-            await session.commit()
+            stale_all.extend(stale)
+        await session.commit()
+    forget_legacy_files(stale_all)
     if added_ids:
         try:
             from radiotomate.beets import BeetsIntegration
@@ -82,8 +79,8 @@ async def loop(app) -> None:
     interval = clamp_interval(app.config.get("BANK_SYNC_INTERVAL"))
     while True:
         try:
-            await or_shutdown(asyncio.sleep(interval))
             await run_sync(app)
+            await or_shutdown(asyncio.sleep(interval))
         except (ShutdownError, asyncio.CancelledError):
             break
         except Exception:

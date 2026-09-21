@@ -1144,8 +1144,10 @@ async def test_cart_bank_folder_sync_once(  # noqa: PLR0913
         json={"title": "Finder Cart", "mode": "playlist", "schedule_mode": "timed"},
     )
     assert created.status_code == 201, await created.get_data(as_text=True)
-    cart_id = (await created.get_json())["cart"]["id"]
-    assert (await created.get_json())["cart"]["bank_folder"] == ""
+    created_body = await created.get_json()
+    cart_id = created_body["cart"]["id"]
+    assert created_body["cart"]["bank_folder"] == f"50-carts/{cart_id}"
+    assert created_body["cart"]["finder_path"] == f"Carts/{cart_id}-Finder-Cart"
     blocked = await client.put(
         f"/carts/{cart_id}.json",
         json={"bank_folder": "10-rotation"},

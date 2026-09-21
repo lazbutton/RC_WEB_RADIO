@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session as ormSession
 from werkzeug.exceptions import BadRequest
 
 from radiotomate.auth import token_required
-from radiotomate.enums import CartMode, ScheduleMode
+from radiotomate.enums import CartMode
 from radiotomate.models import Cart, Sound
 from radiotomate.scheduler.playout import PlayoutGateway, gateway_for
 
@@ -56,7 +56,10 @@ async def push_cart(session: ormSession, current_app, cart_id: int):
 
 
 async def push_named_sound(
-    session: ormSession, current_app, cart_id: int, sound_id: int,
+    session: ormSession,
+    current_app,
+    cart_id: int,
+    sound_id: int,
 ):
     _log.debug("starting push_named_sound(%d, %d)", cart_id, sound_id)
     gateway = gateway_for(current_app.config["PLAYOUT_CLIENT"])
@@ -73,7 +76,7 @@ async def push_named_sound(
     return True
 
 
-async def push_bank_path(  # noqa: PLR0913
+async def push_bank_path(
     session: ormSession,
     current_app,
     path: str,
@@ -215,14 +218,17 @@ async def post_schedule(cart_id: str):
 
     await current_app.scheduler.remove_schedule(cart_id)
 
+    if not cart.schedule_mode.uses_cron:
+        # Clock / jingles carts have no cron: the PUT only drops a stale job
+        # (e.g. a cart that just left TIMED mode).
+        cart.schedule_correct = True
+        _log.info(
+            "Cart #%s is %s: no APScheduler job", cart_id, cart.schedule_mode.value
+        )
+        return "", 200
+
     try:
-        if cart.schedule_mode is ScheduleMode.TIMED:
-            trigger = cart.to_timed_trigger()
-        else:
-            message = f"Requested to schedule the non-timed cart #{cart_id}: "
-            message += cart.schedule_repr
-            _log.error(message)
-            raise BadRequest(message)
+        trigger = cart.to_timed_trigger()
     except ValueError:
         message = f"Invalid cron expression for cart #{cart_id}: {cart.schedule_repr}"
         _log.error(message)

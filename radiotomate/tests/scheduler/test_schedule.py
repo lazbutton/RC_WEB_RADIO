@@ -219,11 +219,15 @@ async def test_schedule(
     fake_sound: Sound,
     auth: dict,
 ):
-    fake_cart.schedule_mode = ScheduleMode.JINGLES
-    await dbsession.commit()
-    result = await client.put(f"/schedule/{fake_cart.id}", headers=auth)
-    result_text = (await result.data).decode()
-    assert result.status_code == 400, "got non-400 response:" + result_text
+    # Non-cron carts: the PUT only removes any stale job and succeeds.
+    for mode in (ScheduleMode.JINGLES, ScheduleMode.CLOCK):
+        fake_cart.schedule_mode = mode
+        await dbsession.commit()
+        result = await client.put(f"/schedule/{fake_cart.id}", headers=auth)
+        result_text = (await result.data).decode()
+        assert result.status_code == 200, "got non-200 response:" + result_text
+        result = await client.get(f"/schedule/{fake_cart.id}", headers=auth)
+        assert result.status_code == 404
 
     year = datetime.now().year + 1
     fake_cart.schedule_mode = ScheduleMode.TIMED

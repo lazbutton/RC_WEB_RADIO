@@ -1,8 +1,15 @@
-name: ghcr-radiotomate
+name: radiotomate
+
+# Tests first, images only when green. Nasgul pulls `:main` every 2 min, so a
+# red test suite must never reach the registry.
 
 on:
   push:
     branches: [main]
+    paths:
+      - "radiotomate/**"
+      - ".github/workflows/ghcr-radiotomate.yml"
+  pull_request:
     paths:
       - "radiotomate/**"
       - ".github/workflows/ghcr-radiotomate.yml"
@@ -12,10 +19,67 @@ permissions:
   packages: write
 
 jobs:
+  tests:
+    name: pytest (scheduler, models, migrations)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: radiotomate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Same interpreter as the Containerfile (python:3.13-slim-bookworm)
+          python-version: "3.13"
+      - name: Install poetry
+        run: pipx install poetry
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+      - name: Ruff (advisory until the backlog is cleared)
+        continue-on-error: true
+        run: |
+          poetry run ruff check radiotomate tests
+          poetry run ruff format --check radiotomate tests
+      - name: Pytest
+        run: >
+          poetry run pytest -q -p no:cacheprovider -o addopts=""
+          tests --ignore=tests/e2e --ignore=tests/interface
+
+  liquidsoap-check:
+    name: liquidsoap --check radiotomate.liq
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/savonet/liquidsoap:v2.4.5
+      options: --user root
+    steps:
+      - uses: actions/checkout@v4
+      - name: Minimal RTCONFIG for the type-checker
+        run: |
+          cat > /tmp/rtconfig.yaml <<'YAML'
+          playout_process_config:
+            input_name: "stream"
+            input_min_buffer: 5.
+            input_max_buffer: 30.
+            token: "ci"
+            start_sound: "/tmp/start.wav"
+          metadata_log:
+            extra_fields: []
+          YAML
+      - name: Type-check the script
+        env:
+          RTCONFIG: /tmp/rtconfig.yaml
+        run: liquidsoap --check radiotomate/playout/radiotomate.liq
+
   docker:
+    name: build & push images
+    needs: [tests, liquidsoap-check]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Dated tag
+        id: tag
+        run: echo "dated=$(date -u +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -31,8 +95,10 @@ jobs:
           push: true
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/button-radiotomate:main
+            ghcr.io/${{ github.repository_owner }}/button-radiotomate:${{ steps.tag.outputs.dated }}
             ghcr.io/${{ github.repository_owner }}/button-radiotomate:${{ github.sha }}
           cache-from: type=gha,scope=radiotomate
           cache-to: type=gha,mode=max,scope=radiotomate
@@ -45,8 +111,10 @@ jobs:
           push: true
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/button-playout:main
+            ghcr.io/${{ github.repository_owner }}/button-playout:${{ steps.tag.outputs.dated }}
             ghcr.io/${{ github.repository_owner }}/button-playout:${{ github.sha }}
           cache-from: type=gha,scope=playout
           cache-to: type=gha,mode=max,scope=playout

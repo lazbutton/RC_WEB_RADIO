@@ -325,6 +325,10 @@ async def conducteur_fire_now_json():
     deny = _desk_live_forbidden()
     if deny:
         return deny
+    from radiotomate.interface.live import harbor_busy_response, harbor_is_live
+
+    if harbor_is_live():
+        return harbor_busy_response()
     data = await read_json_object()
     path = str(data.get("path") or "").strip()
     if not path:

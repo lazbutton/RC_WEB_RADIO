@@ -36,6 +36,7 @@ from radiotomate.scheduler_api import Scheduler
 from radiotomate.services import media_bank
 from radiotomate.services.carts import (
     assert_cart_deletable,
+    release_sound_file,
     require_cart_version,
     sync_cart_display_titles,
 )
@@ -60,17 +61,15 @@ def media_root() -> Path:
     return media_bank.media_root()
 
 
-def path_in_media_bank(path: Path) -> bool:
-    return media_bank.path_in_media_bank(path)
-
-
 def unlink_cart_file(path: Path | None) -> None:
-    """Delete a file copied into /data/carts. Never touch the shared media bank."""
+    """Delete a junk file we just wrote (DATA_ROOT or bank)."""
     if not path:
         return
-    if path_in_media_bank(path):
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError):
         return
-    path.unlink(missing_ok=True)
+    resolved.unlink(missing_ok=True)
 
 
 def resolve_bank_path(raw: str) -> Path:
@@ -235,7 +234,8 @@ def _sound_bank_rel(sound: Sound) -> str:
     try:
         return raw.resolve().relative_to(media_root()).as_posix()
     except Exception:
-        return raw.as_posix()
+        # Outside the bank (DATA_ROOT copies): never leak the server layout.
+        return raw.name
 
 
 def _sound_json(sound: Sound) -> dict:
@@ -296,6 +296,7 @@ def _cart_json(cart: Cart, sounds: list[Sound] | None = None) -> dict:
         "schedule_second": cart.schedule_second,
         "next_sound_id": nxt.id if nxt else None,
         "bank_folder": cart.bank_folder or "",
+        "finder_path": (media_bank.finder_rel(cart.id, cart.title) if cart.id else ""),
         "sounds": [_sound_json(sound) for sound in listed],
     }
 
@@ -317,7 +318,9 @@ def _audio_length(path: Path) -> float | None:
     return float(length)
 
 
-async def _ingest_json_uploads(cart_id: int, uploads: list) -> list[Sound]:
+async def _ingest_json_uploads(
+    cart_id: int, uploads: list, *, drop_invalid: bool = False
+) -> list[Sound]:
     """Keep audio files; skip junk from a dropped folder (.DS_Store, images…)."""
     added: list[Sound] = []
     limit = asyncio.Semaphore(8)
@@ -343,8 +346,9 @@ async def _ingest_json_uploads(cart_id: int, uploads: list) -> list[Sound]:
             if resolved in already:
                 continue
             if length is None:
-                with contextlib.suppress(OSError):
-                    unlink_cart_file(path)
+                if drop_invalid:
+                    with contextlib.suppress(OSError):
+                        unlink_cart_file(path)
                 continue
             already.add(resolved)
             sound = Sound(
@@ -376,9 +380,8 @@ def _queue_analysis_later(sound_ids: list[int]) -> None:
     current_app.add_background_task(_run)
 
 
-def _poke_if_timed(cart: Cart) -> None:
-    if cart.schedule_mode is not ScheduleMode.TIMED:
-        return
+def _poke_schedule(cart: Cart) -> None:
+    """Sync the scheduler job: adds the cron for TIMED, drops it otherwise."""
     try:
         Scheduler.get()
     except RuntimeError:
@@ -483,6 +486,7 @@ async def _rename_cart_title(cart: Cart, title: str) -> None:
         )
         cart.path = new_path
     await sync_cart_display_titles(g.dbsession, cart)
+    media_bank.bind_cart_bank(cart)
 
 
 @blueprint.get("/carts.json")
@@ -507,7 +511,7 @@ async def create_cart_json():
     cart = Cart(title=title, notes=str(data.get("notes") or ""), url="")
     mode_raw = str(data.get("mode") or CartMode.PLAYLIST.value)
     cart.mode = _enum_from_json(CartMode, mode_raw, "mode")
-    schedule_raw = str(data.get("schedule_mode") or ScheduleMode.TIMED.value)
+    schedule_raw = str(data.get("schedule_mode") or ScheduleMode.CLOCK.value)
     cart.schedule_mode = _enum_from_json(ScheduleMode, schedule_raw, "schedule_mode")
     _apply_cart_json(cart, data)
     g.dbsession.add(cart)
@@ -515,8 +519,9 @@ async def create_cart_json():
     cart_root = current_app.config["DATA_ROOT"] / "carts"
     cart.path = safe_path(cart_root, title, prefix=str(cart.id))
     cart.path.mkdir(parents=True)
+    media_bank.bind_cart_bank(cart)
     await g.dbsession.commit()
-    _poke_if_timed(cart)
+    _poke_schedule(cart)
     cart = await _load_cart_json(cart.id)
     return jsonify({"cart": _cart_json(cart)}), 201
 
@@ -538,8 +543,9 @@ async def update_cart_json(cart_id: int):
             raise BadRequest("Please provide a title")
         await _rename_cart_title(cart, title)
     _apply_cart_json(cart, data)
+    media_bank.bind_cart_bank(cart)
     await g.dbsession.commit()
-    _poke_if_timed(cart)
+    _poke_schedule(cart)
     cart = await _load_cart_json(cart.id)
     return jsonify({"cart": _cart_json(cart)})
 
@@ -554,6 +560,7 @@ async def delete_cart_json(cart_id: int):
     if not cart:
         raise NotFound(f"Cart {cart_id} not found")
     await assert_cart_deletable(g.dbsession, cart)
+    media_bank.release_cart_tree(cart.id, cart.title, cart.bank_folder)
     if cart.path:
         shutil.rmtree(cart.path, ignore_errors=True)
     await g.dbsession.delete(cart)
@@ -580,6 +587,8 @@ async def add_sounds_json(cart_id: int):
     cart = await Cart.from_id(g.dbsession, cart_id)
     if not cart:
         raise NotFound(f"Cart {cart_id} not found")
+    media_bank.bind_cart_bank(cart)
+    await g.dbsession.commit()
     body = await request.get_json(silent=True)
     if isinstance(body, dict) and (body.get("folders") or body.get("folder")):
         raw_folders = body.get("folders")
@@ -599,11 +608,12 @@ async def add_sounds_json(cart_id: int):
             uploads.append({"uploaded_to": path, "filename": path.name})
         added_sounds = await _ingest_json_uploads(cart_id, uploads)
     else:
-        form = await stream_form(cart.path)
+        dest = media_bank.cart_upload_dir(cart)
+        form = await stream_form(dest)
         uploads = form.getall("sounds") or form.getall("file")
         if not uploads:
             raise BadRequest("No sound file uploaded")
-        added_sounds = await _ingest_json_uploads(cart_id, uploads)
+        added_sounds = await _ingest_json_uploads(cart_id, uploads, drop_invalid=True)
     if not added_sounds:
         raise BadRequest("No audio file uploaded")
     await g.dbsession.flush()
@@ -667,8 +677,7 @@ async def delete_sounds_json(cart_id: int):
         sound = await Sound.from_id(g.dbsession, sound_id)
         if not sound or sound.cart_id != cart_id:
             raise NotFound(f"Sound {sound_id} not found")
-        if sound.path:
-            unlink_cart_file(sound.path)
+        await release_sound_file(g.dbsession, cart, sound)
         await g.dbsession.delete(sound)
     await g.dbsession.flush()
     await Sound.update_ranks(g.dbsession, cart_id)
@@ -686,8 +695,10 @@ async def delete_sound_json(cart_id: int, sound_id: int):
     sound = await Sound.from_id(g.dbsession, sound_id)
     if not sound or sound.cart_id != cart_id:
         raise NotFound(f"Sound {sound_id} not found")
-    if sound.path:
-        unlink_cart_file(sound.path)
+    cart = await Cart.from_id(g.dbsession, cart_id)
+    if not cart:
+        raise NotFound(f"Cart {cart_id} not found")
+    await release_sound_file(g.dbsession, cart, sound)
     await g.dbsession.delete(sound)
     await g.dbsession.flush()
     await Sound.update_ranks(g.dbsession, cart_id)
@@ -787,12 +798,11 @@ async def add():
     cart_root = current_app.config["DATA_ROOT"] / "carts"
     cart.path = safe_path(cart_root, title, prefix=str(cart.id))
     cart.path.mkdir(parents=True)
+    media_bank.bind_cart_bank(cart)
     await g.dbsession.commit()
 
-    if cart.schedule_mode is ScheduleMode.TIMED:
-        # do this even if not schedule_correct because it will at least remove that
-        # cart from the schedule
-        current_app.add_background_task(poke_scheduler, cart.id)
+    # Always poke: a cart leaving TIMED must lose its APScheduler job too.
+    current_app.add_background_task(poke_scheduler, cart.id)
 
     return (
         "",
@@ -863,12 +873,11 @@ async def edit(cart_id: int):
     apply_max_duration(cart, form)
     apply_schedule(cart, form)
     apply_url(cart, form)
+    media_bank.bind_cart_bank(cart)
     await g.dbsession.commit()
 
-    if cart.schedule_mode is ScheduleMode.TIMED:
-        # do this even if not schedule_correct because it will at least remove that
-        # cart from the schedule
-        current_app.add_background_task(poke_scheduler, cart.id)
+    # Always poke: a cart leaving TIMED must lose its APScheduler job too.
+    current_app.add_background_task(poke_scheduler, cart.id)
 
     if form.get("coming_from") == "sounds":
         redirect_to = url_for("carts.sounds_list", cart_id=cart_id)
@@ -891,7 +900,9 @@ async def delete(cart_id: int):
     if not cart:
         raise NotFound(f"Cart {cart_id} not found")
     await assert_cart_deletable(g.dbsession, cart)
-    shutil.rmtree(cart.path)
+    media_bank.release_cart_tree(cart.id, cart.title, cart.bank_folder)
+    if cart.path:
+        shutil.rmtree(cart.path, ignore_errors=True)
     await g.dbsession.delete(cart)
     await g.dbsession.commit()
     return ""
@@ -930,6 +941,10 @@ async def push_now(cart_id: int):
 async def push_now_json(cart_id: int):
     if not current_user.user.can_live():
         return jsonify({"error": "forbidden"}), 403
+    from radiotomate.interface.live import harbor_busy_response, harbor_is_live
+
+    if harbor_is_live():
+        return harbor_busy_response()
     cart = await Cart.from_id(g.dbsession, cart_id)
     if not cart:
         return jsonify({"error": "not_found"}), 404
@@ -946,6 +961,10 @@ async def push_now_json(cart_id: int):
 async def push_sound_now_json(cart_id: int, sound_id: int):
     if not current_user.user.can_live():
         return jsonify({"error": "forbidden"}), 403
+    from radiotomate.interface.live import harbor_busy_response, harbor_is_live
+
+    if harbor_is_live():
+        return harbor_busy_response()
     cart = await Cart.from_id(g.dbsession, cart_id, load_sounds=True)
     if not cart:
         return jsonify({"error": "not_found"}), 404
@@ -1011,7 +1030,9 @@ async def add_sounds(cart_id: int):
     cart = await Cart.from_id(g.dbsession, cart_id)
     if not cart:
         raise NotFound(f"Cart {cart_id} not found")
-    form = await stream_form(cart.path)
+    media_bank.bind_cart_bank(cart)
+    await g.dbsession.commit()
+    form = await stream_form(media_bank.cart_upload_dir(cart))
     added_sounds = []
     rank = await Sound.next_rank(g.dbsession, cart_id)
     for uploaded_file in form.getall("sounds"):
@@ -1071,7 +1092,7 @@ async def delete_sound(cart_id: int, sound_id: int):
     if not sound.cart.id == cart_id:
         raise NotFound(f"Sound {sound_id} is not in cart {cart_id}")
 
-    unlink_cart_file(sound.path)
+    await release_sound_file(g.dbsession, sound.cart, sound)
     await g.dbsession.delete(sound)
     await g.dbsession.flush()
 

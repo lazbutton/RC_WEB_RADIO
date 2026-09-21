@@ -35,6 +35,15 @@ class CartMode(Enum):
 
 
 class ScheduleMode(Enum):
+    """
+    Who decides *when* a cart plays.
+
+    ``CLOCK`` is the target (ENF-05): the cart is only aired by clock positions,
+    anchors or the desk pads; no cron, no APScheduler job. ``TIMED`` keeps the
+    legacy cron for carts the clocks do not cover yet.
+    """
+
+    CLOCK = "clock"
     JINGLES = "jingles"
     TIMED = "timed"
 
@@ -44,10 +53,16 @@ class ScheduleMode(Enum):
         TODO this should be replaced by translation functions
         """
         match self:
+            case ScheduleMode.CLOCK:
+                return "Horloge"
             case ScheduleMode.JINGLES:
                 return "Jingles"
             case ScheduleMode.TIMED:
                 return "Timed"
+
+    @property
+    def uses_cron(self) -> bool:
+        return self is ScheduleMode.TIMED
 
 
 class PositionKind(Enum):

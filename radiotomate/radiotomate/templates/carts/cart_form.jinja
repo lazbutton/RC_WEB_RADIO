@@ -14,7 +14,7 @@
 <form aria-labelledby="cart_title"
     x-data="{
         advanced: {{ is_advanced }},
-        schedule: '{{ cart.schedule_mode.name if cart else ScheduleMode.TIMED.name }}',
+        schedule: '{{ cart.schedule_mode.name if cart else ScheduleMode.CLOCK.name }}',
         mode: '{{ cart.mode.name if cart else CartMode.PLAYLIST.name }}'
         }">
 
