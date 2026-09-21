@@ -535,7 +535,7 @@ async def test_realign_skips_implausible_shift(
     second = await RundownItem.from_id(dbsession, ids[1])
     planned_second = second.planned_at
     shift = await realign_rundown(
-        dbsession, first, first.planned_at + timedelta(hours=1, minutes=6)
+        dbsession, first, first.planned_at + timedelta(minutes=16)
     )
     assert shift == timedelta(0)
     assert (await RundownItem.from_id(dbsession, ids[1])).planned_at == planned_second

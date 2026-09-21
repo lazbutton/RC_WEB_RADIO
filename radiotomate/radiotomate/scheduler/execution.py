@@ -703,7 +703,7 @@ async def reconcile_as_run(session: ormSession, log: MetadataLog) -> None:
 REALIGN_TOLERANCE = timedelta(seconds=5)
 # Beyond this the as-run row was linked to the wrong planned item (repeated
 # title / sound); shifting the whole rundown by an hour would do more harm.
-REALIGN_MAX = timedelta(minutes=30)
+REALIGN_MAX = timedelta(minutes=10)
 
 
 async def realign_rundown(
