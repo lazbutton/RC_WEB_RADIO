@@ -18,7 +18,7 @@ def test_normalize_live_cues_and_simulating():
             "artist": "Demo",
             "title": "Now",
             "kind": "musique",
-        "remaining": "12.4",
+            "remaining": "12.4",
             "elapsed": "3.1",
             "next_autodj": {"title": "Next", "artist": "A", "rid": 2},
             "next_jingle": {"rid": -1},
@@ -247,3 +247,59 @@ async def test_now_json_conflict_when_harbor(  # noqa: PLR0913
     assert now.status_code == 409
     mock.push_cart.assert_not_called()
     mock.push_path.assert_not_called()
+
+
+async def test_antenne_state_and_flush_json(
+    raw_app,
+    app_configration: dict,
+    beets_integration: BeetsIntegration,
+    dbsession: ormSession,
+    users_password: str,
+):
+    user = User(username="antenne-state")
+    user.update_password(users_password)
+    user.update_permissions({"can_live": "true"})
+    dbsession.add(user)
+    await dbsession.commit()
+    client = _interface_client(app_configration, beets_integration)
+
+    anonymous = await client.get("/antenne/state.json")
+    assert anonymous.status_code == 401
+
+    await _login(client, "antenne-state", users_password)
+    mock = MagicMock()
+    mock.state = AsyncMock(
+        return_value={"playout": {"reachable": True}, "incidents": []}
+    )
+    mock.flush_queues = AsyncMock()
+    with patch.object(Scheduler, "get", return_value=mock):
+        state = await client.get("/antenne/state.json")
+        assert state.status_code == 200
+        assert (await state.get_json())["playout"]["reachable"] is True
+
+        mock.state = AsyncMock(return_value=None)
+        down = await client.get("/antenne/state.json")
+        assert down.status_code == 502
+
+        flushed = await client.post("/antenne/flush.json")
+        assert flushed.status_code == 200
+        mock.flush_queues.assert_awaited_once()
+
+
+async def test_antenne_state_demo_scheduler():
+    from radiotomate.scheduler_api import SchedulerDemo
+
+    demo = SchedulerDemo.__new__(SchedulerDemo)
+    demo._played = [
+        {
+            "at": "2026-09-21T21:00:00",
+            "queue": "autodj",
+            "artist": "nowave",
+            "title": "Dahlia",
+        },
+    ]
+    body = await demo.state()
+    assert body["demo"] is True
+    assert body["engine"]["heartbeat_ok"] is True
+    assert body["listeners"][0]["mount"] == "button.mp3"
+    assert body["asrun"][0]["title"] == "Dahlia"

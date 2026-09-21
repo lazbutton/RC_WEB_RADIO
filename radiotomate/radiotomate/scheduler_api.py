@@ -92,6 +92,21 @@ class Scheduler:
     async def skip(self):
         await self.client.delete("/live")
 
+    async def state(self) -> dict | None:
+        """Antenna state (`/antenne/state.json`) or None when unreachable."""
+        try:
+            result = await self.client.get("/antenne/state.json", timeout=8.0)
+        except httpx.HTTPError as exc:
+            _log.warning("antenna state failed: %s", exc)
+            return None
+        if result.status_code != 200:
+            _log.warning("antenna state HTTP %s", result.status_code)
+            return None
+        try:
+            return result.json()
+        except ValueError:
+            return None
+
     async def live_rundown(
         self,
         session,
@@ -482,7 +497,9 @@ class SchedulerDemo(Scheduler):
         if self._items:
             have = {item.get("id") for item in self._items if item.get("id")}
             self._items.extend(
-                item for item in incoming if item.get("id") and item.get("id") not in have
+                item
+                for item in incoming
+                if item.get("id") and item.get("id") not in have
             )
         else:
             self._items = incoming
@@ -526,6 +543,59 @@ class SchedulerDemo(Scheduler):
     async def flush_queues(self) -> None:
         self.discard_forecast()
         self._played = []
+
+    async def state(self) -> dict | None:
+        """Demo antenna: everything green, no listeners, the played log as as-run."""
+        played = list(getattr(self, "_played", []))[-8:]
+        return {
+            "at": datetime.now().isoformat(timespec="seconds"),
+            "demo": True,
+            "playout": {
+                "reachable": True,
+                "source": "autodj",
+                "silence_s": 0.0,
+                "rms_db": -18.0,
+                "harbor_s": None,
+                "voiceover": False,
+                "icecast_targets": ["icecast:8000/button.mp3"],
+                "icecast_connected": ["icecast:8000/button.mp3"],
+                "icecast_down": [],
+            },
+            "engine": {
+                "heartbeat_age_s": 0.5,
+                "heartbeat_ok": True,
+                "playout_connected": True,
+                "db_ok": True,
+                "tick_run_total": 0,
+                "tick_gated_total": 0,
+            },
+            "incidents": [],
+            "listeners": [
+                {
+                    "target": "icecast:8000/button.mp3",
+                    "host": "icecast",
+                    "mount": "button.mp3",
+                    "reachable": True,
+                    "mounted": True,
+                    "connected": True,
+                    "listeners": 0,
+                    "listener_peak": 0,
+                }
+            ],
+            "asrun": [
+                {
+                    "on_air": str(row.get("at") or ""),
+                    "source": str(row.get("queue") or "autodj"),
+                    "artist": str(row.get("artist") or ""),
+                    "title": str(row.get("title") or ""),
+                    "path": row.get("path"),
+                    "rundown_item_id": row.get("id"),
+                }
+                for row in reversed(played)
+                if isinstance(row, dict)
+            ],
+            "next_live_slot": None,
+        }
 
     async def live_rundown(
         self,

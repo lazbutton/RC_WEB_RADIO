@@ -17,6 +17,7 @@ from radiotomate.quart import CustomQuart
 from radiotomate.scheduler import (
     alerts,
     analyzer,
+    antenne,
     bank_sync,
     harbor,
     health,
@@ -46,6 +47,10 @@ def app_factory(config: dict, beets: BeetsIntegration) -> CustomQuart:
             "ALCHEMY_ENGINE_CONFIG": config["db"],
             "DATA_ROOT": Path(config["data"]["root"]),
             "PLAYOUT_TOKEN": config["playout_process_config"]["token"],
+            # Icecast targets (host/port/mount) for the antenna state listeners.
+            "PLAYOUT_OUTPUTS": list(
+                config["playout_process_config"].get("outputs") or []
+            ),
             "PLAYOUT_CLIENT": AsyncClient(
                 base_url="http://127.0.0.1:6833",
                 headers={
@@ -96,6 +101,7 @@ def app_factory(config: dict, beets: BeetsIntegration) -> CustomQuart:
     app.register_blueprint(health.blueprint)
     app.register_blueprint(analyzer.blueprint)
     app.register_blueprint(harbor.blueprint)
+    app.register_blueprint(antenne.blueprint)
     app.register_blueprint(live.blueprint)
     app.register_blueprint(metadata_log.blueprint)
     app.register_blueprint(version.blueprint)

@@ -218,3 +218,24 @@ async def skip_json():
     await Scheduler.get().skip()
     invalidate_conducteur_cache()
     return jsonify({"ok": True})
+
+
+@blueprint.get("/antenne/state.json")
+@login_required
+async def antenne_state_json():
+    """Antenna health for the console (playout, Icecast outputs, incidents…)."""
+    state = await Scheduler.get().state()
+    if state is None:
+        return jsonify({"error": "scheduler_unavailable"}), 502
+    return jsonify(state)
+
+
+@blueprint.post("/antenne/flush.json")
+@login_required
+async def antenne_flush_json():
+    """Empty the Liquidsoap queues (the clock refills them on the next tick)."""
+    if not current_user.user.can_live():
+        return jsonify({"error": "forbidden"}), 403
+    await Scheduler.get().flush_queues()
+    invalidate_conducteur_cache()
+    return jsonify({"ok": True})
