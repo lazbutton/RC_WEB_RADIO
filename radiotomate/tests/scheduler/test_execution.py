@@ -516,3 +516,26 @@ async def test_ensure_forecast_ignores_failed_coverage(
         select(RundownItem).where(RundownItem.status == "planned").limit(1)
     )
     assert fresh is not None
+
+
+async def test_realign_skips_implausible_shift(
+    dbsession: ormSession,
+    jingles_cart,
+    pubs_cart,
+    beets_integration: BeetsIntegration,
+):
+    from datetime import timedelta
+
+    from radiotomate.scheduler.execution import realign_rundown
+
+    now = datetime(2026, 9, 14, 0, 30, tzinfo=PARIS)
+    payload = await ensure_forecast(dbsession, beets_integration, now=now, cursor=0)
+    ids = [item["id"] for item in payload["items"] if item.get("origin") != "desk"]
+    first = await RundownItem.from_id(dbsession, ids[0])
+    second = await RundownItem.from_id(dbsession, ids[1])
+    planned_second = second.planned_at
+    shift = await realign_rundown(
+        dbsession, first, first.planned_at + timedelta(hours=1, minutes=6)
+    )
+    assert shift == timedelta(0)
+    assert (await RundownItem.from_id(dbsession, ids[1])).planned_at == planned_second

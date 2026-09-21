@@ -73,6 +73,8 @@ MD_FIELDS = [
   ('title', 'keep'),
   ('album', 'keep'),
   ('radiotomate_sound_id', 'keep'),
+  ('radiotomate_item_id', 'keep'),
+  ('radiotomate_queue', 'keep'),
   ... list.map(fun (f) -> (f, 'keep'), conf.metadata_log.extra_fields ?? [])
 ]
 
@@ -816,6 +818,7 @@ def queue_POST(req, res) =
     artist: string?,
     title: string?,
     radiotomate_sound_id: int?,
+    radiotomate_item_id: string?,
     rg_track_gain: float?,
   }) = req.body()
 
@@ -823,6 +826,14 @@ def queue_POST(req, res) =
   annotated = "annotate:pushed=\"#{pushed}\",radiotomate_queue=\"#{queue_name}\"" ^
     if null.defined(posted.radiotomate_sound_id) then
       ",radiotomate_sound_id=\"#{null.get(posted.radiotomate_sound_id)}\""
+    else
+      ""
+    end
+    ^
+    # Rundown item id: lets the scheduler link the as-run row to the exact
+    # planned item (titles and sound ids repeat in a small rotation).
+    if null.defined(posted.radiotomate_item_id) then
+      ",radiotomate_item_id=\"#{null.get(posted.radiotomate_item_id)}\""
     else
       ""
     end

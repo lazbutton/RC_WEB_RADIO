@@ -701,6 +701,9 @@ async def reconcile_as_run(session: ormSession, log: MetadataLog) -> None:
 
 
 REALIGN_TOLERANCE = timedelta(seconds=5)
+# Beyond this the as-run row was linked to the wrong planned item (repeated
+# title / sound); shifting the whole rundown by an hour would do more harm.
+REALIGN_MAX = timedelta(minutes=30)
 
 
 async def realign_rundown(
@@ -724,6 +727,13 @@ async def realign_rundown(
         return timedelta(0)
     delta = started - planned
     if abs(delta) < REALIGN_TOLERANCE:
+        return timedelta(0)
+    if abs(delta) > REALIGN_MAX:
+        _log.warning(
+            "rundown realign skipped: %+.0fs on %s looks like a mislinked as-run",
+            delta.total_seconds(),
+            item.id,
+        )
         return timedelta(0)
     following = list(
         await session.scalars(
@@ -758,6 +768,24 @@ async def _latest_item_for_sound(
     session: ormSession,
     sound_id: int,
 ) -> RundownItem | None:
+    """
+    Fallback link when Liquidsoap did not echo ``radiotomate_item_id``: the
+    earliest item of that sound already handed to the playout. A small
+    rotation repeats sounds, so "most recently created" picked a row planned
+    an hour ahead and dragged the whole rundown with it.
+    """
+    engaged = ENGAGED_STATUSES - {RundownStatus.ON_AIR.value}
+    item = await session.scalar(
+        select(RundownItem)
+        .where(
+            RundownItem.sound_id == sound_id,
+            RundownItem.status.in_(list(engaged)),
+        )
+        .order_by(RundownItem.planned_at, RundownItem.sequence)
+        .limit(1)
+    )
+    if item is not None:
+        return item
     return await session.scalar(
         select(RundownItem)
         .where(RundownItem.sound_id == sound_id)
